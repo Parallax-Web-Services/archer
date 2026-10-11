@@ -1,0 +1,236 @@
+{
+    "approval": {
+        "nodes": {
+            "composer": {
+                "driver": "apt",
+                "manifest": "composer",
+                "manifest_sha256": "bf9b5a0e4a0f123e88c0730b5d56f6734b57d9e39cf79b055460e4b31a701862",
+                "requires": [
+                    "php>=8.4"
+                ],
+                "route_sha256": "353da0c826902cd1a27d1c427187a76214a16b6ddb9479b46dec7f83e80c050e",
+                "version_constraint": [
+                    "composer>=2"
+                ]
+            },
+            "custom-community-ranking": {
+                "driver": null,
+                "manifest": null,
+                "manifest_sha256": null,
+                "requires": [],
+                "route_sha256": null,
+                "version_constraint": [
+                    "custom-community-ranking"
+                ]
+            },
+            "laravel": {
+                "driver": "composer",
+                "manifest": "laravel",
+                "manifest_sha256": "5f30d2cef1bfe6bb66a0cd546ba1bf77a746f48c302542e7c90038498e7eb747",
+                "requires": [
+                    "composer>=2",
+                    "php>=8.4"
+                ],
+                "route_sha256": "3fc593487930a11e30ad504e894774301ea52ef9cf14d76e8b2ba6fe7d883bf5",
+                "version_constraint": [
+                    "laravel"
+                ]
+            },
+            "php": {
+                "driver": "apt",
+                "manifest": "php",
+                "manifest_sha256": "da3c1f4abb823f1802a3aaf96cc3c329b178b0f51ef5a2315e383b4de7352b73",
+                "requires": [],
+                "route_sha256": "a6de87f4971d0b0e3ae8d7f777ab328dff9af328390e85b9395ffced1fe0d599",
+                "version_constraint": [
+                    "php>=8.4"
+                ]
+            }
+        },
+        "operation": "install",
+        "requirements": [
+            "custom-community-ranking",
+            "laravel"
+        ],
+        "schema": "archer.approval/v1",
+        "sha256": "8027fe510d84b16ce6a14cb168b993ec8a5fd1cb2e81d162cda7a0c7bdc37c6c"
+    },
+    "constraints": {
+        "composer": [
+            "composer>=2"
+        ],
+        "custom-community-ranking": [
+            "custom-community-ranking"
+        ],
+        "laravel": [
+            "laravel"
+        ],
+        "php": [
+            "php>=8.4"
+        ]
+    },
+    "dependencies": [
+        {
+            "manifest": "php",
+            "name": "php",
+            "plan": {
+                "commands": [
+                    [
+                        "apt-get",
+                        "install",
+                        "--yes",
+                        "--",
+                        "php8.4-cli"
+                    ]
+                ],
+                "destructive": false,
+                "driver": "apt",
+                "requires_privilege": true,
+                "route": {
+                    "package": "php8.4-cli",
+                    "provides_version": "8.4.0",
+                    "when": "linux.debian"
+                },
+                "target": "/snapshot/archer/php"
+            },
+            "requires": [],
+            "status": "installable",
+            "verify": [
+                {
+                    "argv": [
+                        "php",
+                        "--version"
+                    ],
+                    "version_pattern": "/PHP (\\d+\\.\\d+\\.\\d+)/"
+                }
+            ]
+        },
+        {
+            "manifest": "composer",
+            "name": "composer",
+            "plan": {
+                "commands": [
+                    [
+                        "apt-get",
+                        "install",
+                        "--yes",
+                        "--",
+                        "composer"
+                    ]
+                ],
+                "destructive": false,
+                "driver": "apt",
+                "requires_privilege": true,
+                "route": {
+                    "package": "composer",
+                    "provides_version": "2.0.0",
+                    "when": "linux.debian"
+                },
+                "target": "/snapshot/archer/composer"
+            },
+            "requires": [
+                "php>=8.4"
+            ],
+            "status": "installable",
+            "verify": [
+                {
+                    "argv": [
+                        "composer",
+                        "--version"
+                    ],
+                    "version_pattern": "/Composer(?: version)? (\\d+\\.\\d+\\.\\d+)/"
+                }
+            ]
+        },
+        {
+            "manifest": "laravel",
+            "name": "laravel",
+            "plan": {
+                "commands": [
+                    [
+                        "composer",
+                        "global",
+                        "require",
+                        "--no-interaction",
+                        "--",
+                        "laravel/installer:^5"
+                    ]
+                ],
+                "destructive": false,
+                "driver": "composer",
+                "requires_privilege": false,
+                "route": {
+                    "package": "laravel/installer",
+                    "provides_version": "5.0.0",
+                    "version": "^5"
+                },
+                "target": "/snapshot/archer/laravel"
+            },
+            "requires": [
+                "php>=8.4",
+                "composer>=2"
+            ],
+            "status": "installable",
+            "verify": [
+                {
+                    "argv": [
+                        "composer",
+                        "global",
+                        "exec",
+                        "--",
+                        "laravel",
+                        "--version"
+                    ],
+                    "version_pattern": "/Laravel Installer (\\d+\\.\\d+\\.\\d+)/"
+                }
+            ]
+        },
+        {
+            "name": "custom-community-ranking",
+            "reason": "No manifest",
+            "requires": [],
+            "status": "unsatisfied",
+            "verify": []
+        }
+    ],
+    "dry_run": true,
+    "errors": [],
+    "evidence": [],
+    "installable": [
+        "laravel"
+    ],
+    "platform": "linux.debian",
+    "provider": "archer",
+    "providers": {
+        "laravel": "archer"
+    },
+    "remaining": [
+        "custom-community-ranking"
+    ],
+    "routes": {
+        "laravel": {
+            "commands": [
+                [
+                    "composer",
+                    "global",
+                    "require",
+                    "--no-interaction",
+                    "--",
+                    "laravel/installer:^5"
+                ]
+            ],
+            "destructive": false,
+            "driver": "composer",
+            "requires_privilege": false,
+            "route": {
+                "package": "laravel/installer",
+                "provides_version": "5.0.0",
+                "version": "^5"
+            },
+            "target": "/snapshot/archer/laravel"
+        }
+    },
+    "satisfied": [],
+    "schema": "parallax.resolution/v1",
+    "status": "partial"
+}

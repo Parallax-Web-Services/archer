@@ -2,6 +2,11 @@
 
 Design baseline: 11 October 2026. Implemented baseline: [9192f3b](https://github.com/Parallax-Web-Services/archer/commit/9192f3bbce3c99fa14644012a08e8bd55823c239), the first Go core. Sections describing the target architecture and delivery gates are commitments for subsequent implementation, not features of that baseline.
 
+The current checkout adds an initial [native worker adapter](PROTOCOL.md),
+strict handoff/approval validation, a PHP transport bridge, and explicit discovery
+states. That advances Gate 1; complete PHP recipe compatibility, catalog coverage,
+and functional service readiness still require implementation.
+
 Archer is the solo installer and environment coordinator for Zefram. A developer should be able to check out an application, run `archer i`, and receive a usable environment without personally operating Composer, npm, Docker, Kubernetes, or apt. Archer first asks what the project needs and what the user can already use. It connects a suitable existing service, reuses compatible local software and verified cached work, and installs or builds only what remains. Slipstream handles genuinely unresolved work after those routes have been exhausted.
 
 The Go core currently implements the first decision and publication boundary: explicit requirements, service discovery, live checks, verified executable caching, scoped installation, and outcome memory. It cannot yet prepare a normal PHP and Node application. The next meaningful milestone is one real Zefram application working through the complete flow below. More CLI commands alone would not meet that milestone.
@@ -93,7 +98,7 @@ The target service adapter checks the requested API or protocol version, require
 
 The current exact capability match and HTTP 200 check are an initial selection mechanism. Before production use, adapters must strengthen that evidence. A catalog also needs a declared coverage scope and freshness: which team, environment, capability families, and providers it represents. Without that, an empty result cannot establish awareness of the entire Parallax ecosystem.
 
-There is a current coverage gap to close: configured stale catalogs block fallback, but a project with no configured catalogs can still select local recipes and report `ai_eligible`. That flag is not proof of complete discovery. The production resolver must distinguish `not configured`, `unavailable`, `fresh with no suitable match`, and `fresh with an inaccessible match`. An explicitly local requirement can follow local policy; an unrestricted capability must resolve discovery coverage before fallback.
+The current checkout distinguishes `not configured`, `unavailable`, `stale`, `fresh with no suitable match`, and `fresh with an inaccessible match`. Missing configured discovery blocks unrestricted installation and AI eligibility. An explicitly local requirement can follow local policy, and a configured verified service or live local capability can still be reused. A fresh configured source set does not establish complete ecosystem coverage; that stronger catalog contract remains pending.
 
 ### Resolve and lock before applying
 

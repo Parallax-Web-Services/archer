@@ -24,8 +24,11 @@ type Engine struct {
 	ProjectDir string
 	Home       string
 	Offline    bool
-	scopeKey   string
-	store      *store.Store
+	// Remote planning may discover routes, but cannot prove the worker's
+	// installed state by executing probes on the planning host.
+	SkipLocalVerification bool
+	scopeKey              string
+	store                 *store.Store
 }
 
 func Load(projectDir, home string, offline bool) (*Engine, error) {
@@ -81,6 +84,10 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	if err := check.Validate(); err != nil {
 		return Plan{}, err
 	}
+	sources, err := e.sourceHashes()
+	if err != nil {
+		return Plan{}, err
+	}
 	profile, err := e.Context()
 	if err != nil {
 		return Plan{}, err
@@ -91,28 +98,45 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	for _, service := range e.Project.Services {
 		bindings[service.ID] = service
 	}
-	discoveryUnknown := false
+	// Freshness refers only to the configured sources. No sources is unknown
+	// discovery, never evidence that the Parallax ecosystem has no match.
+	discoveryState := "not_configured"
+	if len(e.Project.Registries) > 0 {
+		discoveryState = catalog.StateFresh
+	}
 	for _, url := range e.Project.Registries {
 		var snapshot catalog.Snapshot
 		if e.Offline {
-			snapshot = catalog.Snapshot{Source: url, Stale: true, Error: "catalog refresh disabled in offline mode"}
+			snapshot = catalog.Snapshot{Source: url, Stale: true, State: catalog.StateUnavailable, Error: "catalog refresh disabled in offline mode"}
 		} else {
 			snapshot, err = catalog.Fetch(ctx, url, filepath.Join(e.Home, "catalogs"))
 			if err != nil {
 				snapshot.Error = err.Error()
 				snapshot.Stale = true
+				snapshot.State = catalog.StateUnavailable
+				snapshot.Source = url
 			}
 		}
 		plan.Catalogs = append(plan.Catalogs, snapshot)
 		if snapshot.Stale {
-			discoveryUnknown = true
+			if snapshot.State == catalog.StateUnavailable || discoveryState != catalog.StateUnavailable {
+				discoveryState = snapshot.State
+			}
 			continue
 		}
 		services = append(services, snapshot.Services...)
 	}
+	discoveryUnknown := discoveryState != catalog.StateFresh
 	sort.SliceStable(services, func(i, j int) bool { return services[i].ID < services[j].ID })
 	for _, r := range requirements {
-		d := Decision{Requirement: r, Status: "unresolved", Reason: "no known capability; hand remaining intent to Slipstream", AIEligible: !discoveryUnknown}
+		state := discoveryState
+		if state == catalog.StateFresh {
+			state = "fresh_no_match"
+		}
+		if r.Delivery == "local" {
+			state = "local"
+		}
+		d := Decision{Requirement: r, Status: "unresolved", Reason: "no known capability; hand remaining intent to Slipstream", AIEligible: !discoveryUnknown || r.Delivery == "local", Discovery: state}
 		if r.Constraint != "" && !packageRequirement(r) {
 			d.Reason = "version-constrained capability needs the version resolver; availability alone does not establish compatibility"
 			d.AIEligible = false
@@ -134,6 +158,9 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 				return candidates[i].ID == preferred && candidates[j].ID != preferred
 			})
 		}
+		if len(candidates) > 0 && !discoveryUnknown {
+			d.Discovery = "fresh_match"
+		}
 		for _, s := range candidates {
 			if e.Offline {
 				continue
@@ -146,17 +173,17 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 			}
 			evidence, err := catalog.Verify(ctx, binding)
 			if err == nil {
-				d = Decision{Requirement: r, Status: "service", Provider: s.ID, Reason: "reuse a verified configured service; no installation", Evidence: evidence}
+				d = Decision{Requirement: r, Status: "service", Provider: s.ID, Reason: "reuse a verified configured service; no installation", Evidence: evidence, Discovery: "bound"}
 				break
 			}
 		}
-		if d.Status == "unresolved" && r.Delivery != "service" && !packageRequirement(r) {
+		if d.Status == "unresolved" && !e.SkipLocalVerification && r.Delivery != "service" && !packageRequirement(r) {
 			for _, l := range e.Project.Local {
 				if !provides(l.Provides, r.Capability) {
 					continue
 				}
 				if evidence, err := e.probe(ctx, l.Probe); err == nil {
-					d = Decision{Requirement: r, Status: "local", Provider: l.ID, Reason: "reuse a freshly verified local capability", Evidence: evidence}
+					d = Decision{Requirement: r, Status: "local", Provider: l.ID, Reason: "reuse a freshly verified local capability", Evidence: evidence, Discovery: "local"}
 					break
 				}
 			}
@@ -167,6 +194,9 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 			d.AIEligible = false
 		} else if d.Status == "unresolved" && discoveryUnknown && r.Delivery != "local" && !packageRequirement(r) {
 			d.Reason = "service discovery is stale or unavailable; resolve discovery before installing or generating"
+			if discoveryState == "not_configured" {
+				d.Reason = "service discovery is not configured; configure catalog coverage or declare local delivery before installing or generating"
+			}
 			d.AIEligible = false
 		} else if d.Status == "unresolved" && !packageRequirement(r) && r.Delivery != "service" {
 			for _, recipe := range e.Project.Recipes {
@@ -177,12 +207,12 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 				if err != nil {
 					return Plan{}, fmt.Errorf("cache integrity for %s: %w", recipe.ID, err)
 				}
-				d = Decision{Requirement: r, Status: "install", Provider: recipe.ID, Reason: "install a pinned artifact through Archer", Path: e.target(recipe), Cached: cached}
+				d = Decision{Requirement: r, Status: "install", Provider: recipe.ID, Reason: "install a pinned artifact through Archer", Path: e.target(recipe), Cached: cached, Discovery: d.Discovery}
 				if cached {
 					d.Reason = "reuse verified content from the shared artifact cache"
 					d.Evidence = path
 				}
-				if verifiedTarget(d.Path, strings.ToLower(recipe.Artifact.SHA256)) {
+				if !e.SkipLocalVerification && verifiedTarget(d.Path, strings.ToLower(recipe.Artifact.SHA256)) {
 					d.Status = "installed"
 					d.Reason = "reuse a freshly hash-verified managed artifact"
 					d.Evidence = "sha256:" + recipe.Artifact.SHA256
@@ -193,6 +223,7 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 		if packageRequirement(r) && d.Status == "unresolved" {
 			d.Reason = "in-process package dependency needs a package resolver; a remote service cannot substitute for this library"
 			d.AIEligible = false
+			d.Discovery = "not_applicable"
 		}
 		plan.Decisions = append(plan.Decisions, d)
 		if d.Status == "unresolved" || d.Status == "install" {
@@ -205,10 +236,11 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 		Status      string
 		Provider    string
 		Path        string
+		Discovery   string
 	}
 	routes := []selected{}
 	for _, d := range plan.Decisions {
-		routes = append(routes, selected{d.Requirement, d.Status, d.Provider, d.Path})
+		routes = append(routes, selected{d.Requirement, d.Status, d.Provider, d.Path, d.Discovery})
 	}
 	identity := struct {
 		Project  Project
@@ -218,7 +250,7 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 		Sources  map[string]string
 		Platform string
 		Services []catalog.Service
-	}{e.Project, routes, e.scopeKey, profile.Revision, e.sourceHashes(), plan.Platform, services}
+	}{e.Project, routes, e.scopeKey, profile.Revision, sources, plan.Platform, services}
 	b, _ := json.Marshal(identity)
 	plan.ID = digest(b)
 	return plan, nil
@@ -262,14 +294,33 @@ func refreshRemaining(plan Plan) Plan {
 	}
 	return plan
 }
-func (e *Engine) sourceHashes() map[string]string {
+
+const maxProjectSourceBytes = 16 << 20
+
+func (e *Engine) sourceHashes() (map[string]string, error) {
 	out := map[string]string{}
 	for _, file := range []string{"composer.json", "composer.lock", "package.json", "package-lock.json", "npm-shrinkwrap.json", "archer.json"} {
-		if b, err := os.ReadFile(filepath.Join(e.ProjectDir, file)); err == nil {
-			out[file] = digest(b)
+		f, err := os.Open(filepath.Join(e.ProjectDir, file))
+		if os.IsNotExist(err) {
+			continue
 		}
+		if err != nil {
+			return nil, fmt.Errorf("read project source %s: %w", file, err)
+		}
+		info, err := f.Stat()
+		if err != nil || !info.Mode().IsRegular() || info.Size() > maxProjectSourceBytes {
+			f.Close()
+			return nil, fmt.Errorf("project source %s must be a regular file of at most %d bytes", file, maxProjectSourceBytes)
+		}
+		h := sha256.New()
+		n, readErr := io.Copy(h, io.LimitReader(f, maxProjectSourceBytes+1))
+		closeErr := f.Close()
+		if readErr != nil || closeErr != nil || n > maxProjectSourceBytes {
+			return nil, fmt.Errorf("cannot hash bounded project source %s", file)
+		}
+		out[file] = hex.EncodeToString(h.Sum(nil))
 	}
-	return out
+	return out, nil
 }
 func (e *Engine) probe(ctx context.Context, p Probe) (string, error) {
 	if len(p.Argv) == 0 {

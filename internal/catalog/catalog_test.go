@@ -57,7 +57,7 @@ func TestEndpointlessDescriptorsStayCandidates(t *testing.T) {
 
 func TestUnavailableProviderCannotAuthorizeFallback(t *testing.T) {
 	snapshot, err := parse([]byte(`{"capabilities":[],"providers":{"parallax":{"available":false,"stale":false}}}`), "https://catalog.example")
-	if err != nil || !snapshot.Stale || snapshot.Error == "" {
+	if err != nil || !snapshot.Stale || snapshot.Error == "" || snapshot.State != StateUnavailable {
 		t.Fatalf("unavailable discovery was represented as complete: %#v %v", snapshot, err)
 	}
 }
@@ -91,21 +91,55 @@ func TestFetchCacheFreshnessAndStaleFallback(t *testing.T) {
 	defer server.Close()
 	cache := t.TempDir()
 	first, err := Fetch(context.Background(), server.URL, cache)
-	if err != nil || first.Stale || len(first.Services) != 1 {
+	if err != nil || first.Stale || first.State != StateFresh || len(first.Services) != 1 {
 		t.Fatalf("initial fetch: %#v %v", first, err)
 	}
 	failing.Store(true)
 	fresh, err := Fetch(context.Background(), server.URL, cache)
-	if err != nil || fresh.Stale || calls.Load() != 1 {
+	if err != nil || fresh.Stale || fresh.State != StateFresh || calls.Load() != 1 {
 		t.Fatal("fresh cache did not avoid the network")
 	}
 	expireCache(t, cache)
 	stale, err := Fetch(context.Background(), server.URL, cache)
-	if err != nil || !stale.Stale || stale.Error == "" || len(stale.Services) != 1 || calls.Load() != 2 {
+	if err != nil || !stale.Stale || stale.State != StateStale || stale.Error == "" || len(stale.Services) != 1 || calls.Load() != 2 {
 		t.Fatalf("stale fallback: %#v %v", stale, err)
 	}
-	if _, err := Fetch(context.Background(), server.URL, t.TempDir()); err == nil {
+	if unavailable, err := Fetch(context.Background(), server.URL, t.TempDir()); err == nil || unavailable.State != StateUnavailable || unavailable.Source != server.URL || !unavailable.Stale {
 		t.Fatal("fetch failure without cache must be an error")
+	}
+}
+
+func TestFreshEmptyCatalogIsDistinctFromUnavailableDiscovery(t *testing.T) {
+	for _, test := range []struct {
+		body, wantState string
+		stale           bool
+	}{
+		{`{"schema":"archer.catalog/v1","services":[]}`, StateFresh, false},
+		{`{"schema":"archer.catalog/v1","services":[],"stale":true}`, StateStale, true},
+		{`{"capabilities":[],"providers":{"parallax":{"available":false}}}`, StateUnavailable, true},
+	} {
+		snapshot, err := parse([]byte(test.body), "https://catalog.example")
+		if err != nil || snapshot.State != test.wantState || snapshot.Stale != test.stale || len(snapshot.Services) != 0 {
+			t.Fatalf("empty catalog lost its discovery meaning: %+v %v", snapshot, err)
+		}
+	}
+}
+
+func TestLegacySnapshotCacheReceivesExplicitState(t *testing.T) {
+	for _, stale := range []bool{false, true} {
+		path := filepath.Join(t.TempDir(), "legacy.json")
+		entry := cacheEntry{FetchedAt: time.Now(), Snapshot: Snapshot{Services: []Service{}, Source: "https://catalog.example", Stale: stale}}
+		if err := writeCache(path, entry); err != nil {
+			t.Fatal(err)
+		}
+		cached, ok := readCache(path, entry.Snapshot.Source)
+		want := StateFresh
+		if stale {
+			want = StateStale
+		}
+		if !ok || cached.Snapshot.State != want || cached.Snapshot.Stale != stale {
+			t.Fatalf("legacy cache was not upgraded safely: %+v", cached)
+		}
 	}
 }
 

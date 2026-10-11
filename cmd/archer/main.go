@@ -12,14 +12,16 @@ import (
 	"strings"
 
 	"github.com/Parallax-Web-Services/archer/internal/archer"
+	"github.com/Parallax-Web-Services/archer/internal/parallax"
+	"github.com/Parallax-Web-Services/archer/internal/worker"
 )
 
 var version = "0.1.0-dev"
 
 type options struct {
-	command, project, home, approval string
-	json, offline, plan              bool
-	requirements                     []archer.Requirement
+	command, project, home, approval      string
+	json, offline, plan, stdin, preflight bool
+	requirements                          []archer.Requirement
 }
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -46,6 +48,10 @@ func parse(args []string) (options, error) {
 			o.offline = true
 		case "--plan":
 			o.plan = true
+		case "--stdin":
+			o.stdin = true
+		case "--preflight":
+			o.preflight = true
 		case "--project", "--home", "--approval":
 			i++
 			if i >= len(args) {
@@ -77,10 +83,23 @@ func parse(args []string) (options, error) {
 	return o, nil
 }
 func run(args []string, out, errout io.Writer) int {
+	return runWithInput(args, os.Stdin, out, errout)
+}
+
+func runWithInput(args []string, in io.Reader, out, errout io.Writer) int {
 	o, err := parse(args)
 	if err != nil {
-		fmt.Fprintln(errout, err)
-		return 1
+		return commandError(out, errout, err, o.stdin || o.command == "resolve" || o.command == "capabilities")
+	}
+	machine := o.stdin || o.command == "resolve" || o.command == "capabilities"
+	if o.stdin && o.command != "resolve" && o.command != "i" && o.command != "install" {
+		return commandError(out, errout, fmt.Errorf("--stdin is supported by resolve and install only"), machine)
+	}
+	if o.preflight && (!o.stdin || (o.command != "i" && o.command != "install")) {
+		return commandError(out, errout, fmt.Errorf("--preflight requires install --stdin"), machine)
+	}
+	if o.stdin && (o.plan || o.approval != "" || len(o.requirements) > 0) {
+		return commandError(out, errout, fmt.Errorf("stdin requests cannot be combined with positional requirements, --plan, or --approval; use context.approved_resolution and --preflight"), machine)
 	}
 	switch o.command {
 	case "version":
@@ -94,8 +113,13 @@ Usage:
   archer i [capability ...]            reuse or install checksum-pinned artifacts
   archer i --plan                      inspect without downloading or installing artifacts
   archer context                       show remembered project-scoped outcomes
+  archer capabilities --json           advertise configured capability descriptors
+  archer resolve --json --stdin        return a Parallax resolution for requirements/context
+  archer install --json --stdin        execute an approved Parallax handoff
+  archer install --preflight --stdin   verify an approved handoff without installation
   archer version
-Options: --project DIR --home DIR --json --offline --approval PLAN_ID
+Options: --project DIR --home DIR --json --offline --approval PLAN_ID --plan
+Worker options: --stdin --preflight (native archer.project/v1 recipes only)
 No command invokes a model. Unknown work is returned explicitly.
 `)
 		return 0
@@ -105,15 +129,79 @@ No command invokes a model. Unknown work is returned explicitly.
 			return 1
 		}
 		return 0
-	case "plan", "doctor", "i", "install", "context":
+	case "plan", "doctor", "i", "install", "context", "resolve", "capabilities":
 	default:
 		fmt.Fprintln(errout, "unknown command:", o.command)
 		return 1
 	}
 	engine, err := archer.Load(o.project, o.home, o.offline)
 	if err != nil {
-		fmt.Fprintln(errout, err)
-		return 1
+		return commandError(out, errout, err, machine)
+	}
+	if o.command == "capabilities" {
+		if len(o.requirements) > 0 {
+			return commandError(out, errout, fmt.Errorf("capabilities does not accept requirement arguments"), true)
+		}
+		capabilities, err := worker.Capabilities(engine)
+		if err != nil {
+			return commandError(out, errout, err, true)
+		}
+		return encode(out, capabilities)
+	}
+	if o.command == "resolve" || o.stdin {
+		var input parallax.Object
+		if o.stdin {
+			input, err = parallax.Decode(in)
+		} else {
+			selected, selectErr := selectRequirements(engine.Project, o.requirements)
+			if selectErr != nil {
+				return commandError(out, errout, selectErr, true)
+			}
+			if len(o.requirements) == 0 {
+				selected = engine.Project.Requirements
+			}
+			requirements := []string{}
+			for _, r := range selected {
+				requirements = append(requirements, r.Capability+r.Constraint)
+			}
+			input = parallax.Object{"requirements": requirements, "context": parallax.Object{}}
+		}
+		if err != nil {
+			return commandError(out, errout, err, true)
+		}
+		var result parallax.Object
+		if o.command == "resolve" {
+			result, err = worker.Resolve(context.Background(), engine, input)
+		} else {
+			result, err = worker.Execute(context.Background(), engine, input, o.preflight)
+		}
+		if result == nil {
+			if err == nil {
+				err = fmt.Errorf("worker returned no result")
+			}
+			return commandError(out, errout, err, true)
+		}
+		if code := encode(out, result); code != 0 {
+			return code
+		}
+		if err != nil {
+			fmt.Fprintln(errout, err)
+			return 1
+		}
+		status, _ := result["status"].(string)
+		if status == "failed" {
+			return 1
+		}
+		if o.command == "resolve" {
+			if status == "unsatisfied" {
+				return 2
+			}
+			return 0
+		}
+		if status != "satisfied" {
+			return 2
+		}
+		return 0
 	}
 	if o.command == "context" {
 		value, err := engine.Context()
@@ -124,6 +212,10 @@ No command invokes a model. Unknown work is returned explicitly.
 		return encode(out, value)
 	}
 	var plan archer.Plan
+	o.requirements, err = selectRequirements(engine.Project, o.requirements)
+	if err != nil {
+		return commandError(out, errout, err, false)
+	}
 	if o.command == "i" || o.command == "install" {
 		if o.plan {
 			plan, err = engine.Plan(context.Background(), o.requirements)
@@ -147,6 +239,37 @@ No command invokes a model. Unknown work is returned explicitly.
 		return 2
 	}
 	return 0
+}
+
+func commandError(out, errout io.Writer, err error, machine bool) int {
+	if machine {
+		_ = encode(out, parallax.Object{"error": err.Error()})
+	}
+	fmt.Fprintln(errout, err)
+	return 1
+}
+
+// A selector changes the requirement set, never its declared delivery or version policy.
+func selectRequirements(project archer.Project, selectors []archer.Requirement) ([]archer.Requirement, error) {
+	if len(selectors) == 0 {
+		return nil, nil
+	}
+	selected := []archer.Requirement{}
+	for _, selector := range selectors {
+		match := selector
+		found := false
+		for _, requirement := range project.Requirements {
+			if requirement.Capability != selector.Capability {
+				continue
+			}
+			if found && match != requirement {
+				return nil, fmt.Errorf("capability %s has conflicting project requirements", selector.Capability)
+			}
+			match, found = requirement, true
+		}
+		selected = append(selected, match)
+	}
+	return selected, nil
 }
 func renderPlan(out io.Writer, asJSON bool, plan archer.Plan) int {
 	if asJSON {

@@ -1,5 +1,5 @@
 .\" Source: docs/MANPAGE.md. Keep both forms in sync.
-.TH ARCHER 1 "2026-10-11" "Archer 0.1.0" "User Commands"
+.TH ARCHER 1 "2026-10-11" "Archer 0.1.0-dev" "User Commands"
 .SH "NAME"
 .PP
 archer \- resolve project requirements, reuse services, and install verified artifacts
@@ -12,6 +12,10 @@ archer plan [CAPABILITY ...] [OPTIONS]
 archer install [CAPABILITY ...] [OPTIONS]
 archer i [CAPABILITY ...] [OPTIONS]
 archer doctor [CAPABILITY ...] [OPTIONS]
+archer capabilities [\-\-project DIR] [\-\-json]
+archer resolve [CAPABILITY ...] [OPTIONS]
+archer resolve \-\-stdin [OPTIONS]
+archer install \-\-stdin [\-\-preflight] [OPTIONS]
 archer context [\-\-project DIR] [\-\-home DIR]
 archer version
 archer help
@@ -21,11 +25,11 @@ archer \-\-help
 .PP
 .SH "DESCRIPTION"
 .PP
-Archer prepares project capabilities by checking existing services and local software before obtaining new artifacts. Requirements come from \fBarcher.json\fR in the selected project directory. Positional capability names replace that file's requirement list for the current invocation; they do not add to it.
+Archer prepares project capabilities by checking existing services and local software before obtaining new artifacts. Requirements come from \fBarcher.json\fR in the selected project directory. Positional capability names replace that file's requirement list for the current invocation; they do not add to it. Matching selectors retain the declared delivery and version policy.
 .PP
-For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash\-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Stale configured discovery blocks unrestricted fallback.
+For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash\-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Missing, stale, or unavailable configured discovery blocks unrestricted fallback. Use \fBdelivery: local\fR for an explicitly local\-only artifact requirement.
 .PP
-This version installs individual raw executable artifacts. Composer/npm package requirements and non\-package version constraints remain unresolved. It makes no model calls and does not automatically hand remaining work to Slipstream.
+This version installs individual raw executable artifacts. Composer/npm package requirements and non\-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
 .PP
 .SH "COMMANDS"
 .PP
@@ -57,6 +61,22 @@ Alias for \fBplan\fR. It evaluates the selected requirements rather than inspect
 .PP
 Print project\-scoped provider bindings, context revision, and recent verified outcomes as JSON. An \fBarcher.json\fR configuration is required. No probes or catalog requests run. This command does not change context.
 .PP
+.SS "capabilities"
+.PP
+Print configured capability advertisements as a JSON array without probes or catalog requests. A native project configuration is required. Descriptors advertise potential routes rather than current installed state.
+.PP
+.SS "resolve"
+.PP
+Print \fBparallax.resolution/v1\fR JSON, including verified satisfaction, installable work, unresolved requirements, and a portable native approval. With \fB\-\-stdin\fR, read an object containing \fBrequirements\fR and optional \fBcontext\fR. Otherwise use selected project requirements. Parallax capability names use the lowercase machine\-slug grammar; local package identifiers such as \fBnpm:react\fR are not v1 protocol requirements.
+.PP
+Resolution status counts installable routes as covered. It does not claim installation. \fBcontext.probe_installed: false\fR suppresses planning\-host local probes and installed\-state claims.
+.PP
+.SS "install with --stdin"
+.PP
+Read a \fBparallax.handoff/v1\fR request addressed to and owned by \fBarcher\fR. Require its complete \fBcontext.approved_resolution\fR object with schema \fBarcher.approval/v1\fR and native \fBrecipe_schema: archer.project/v1\fR. Validate integrity, approved scope, definitions, and routes before execution. Return an evidence\-backed \fBparallax.handoff\-result/v1\fR partition, including remaining work and the next owner.
+.PP
+PHP \fBarcher/v1\fR installer approvals describe a different executor and are rejected before probes. The current adapter handles native service health, local probes, and raw executable recipes. See \fBdocs/PROTOCOL.md\fR for the compatibility boundary.
+.PP
 .SS "version"
 .PP
 Print the executable's version and exit. Also available as \fB\-\-version\fR.
@@ -84,6 +104,14 @@ Print plan, doctor, or installation output as \fBarcher.plan/v1\fR JSON instead 
 .SS "--plan"
 .PP
 For \fBinstall\fR or \fBi\fR, perform the same evaluation as \fBplan\fR without obtaining or publishing artifacts. This is not a prohibition on health requests, catalog\-cache updates, or configured probes.
+.PP
+.SS "--stdin"
+.PP
+For \fBresolve\fR, read a resolution request. For \fBinstall\fR or \fBi\fR, read a Parallax handoff. Input must be one UTF\-8 JSON object, at most 2 MiB, with bounded nesting and no duplicate keys or trailing second object. Protocol responses always use JSON. Positional selectors, \fB\-\-plan\fR, and local \fB\-\-approval PLAN_ID\fR cannot be combined with stdin requests.
+.PP
+.SS "--preflight"
+.PP
+Require \fBinstall \-\-stdin\fR or \fBi \-\-stdin\fR. Verify frozen native routes without downloading or publishing artifacts, refreshing catalog cache, or writing context. Missing readiness returns pending work with exit status 2. Caller assertions about installed software do not establish readiness.
 .PP
 .SS "--offline"
 .PP
@@ -189,6 +217,8 @@ SCOPE_KEY is derived from the explicit project scope and canonical absolute proj
 .PP
 Command completed successfully. For plan, doctor, and installation, all selected requirements are satisfied. An empty requirement set is satisfied.
 .PP
+For \fBresolve\fR, status \fBsatisfied\fR or \fBpartial\fR returns 0 because installable routes count as coverage. Its \fBsatisfied\fR array still contains only verified state.
+.PP
 .SS "1"
 .PP
 Configuration, integrity, approval\-drift, execution, or output error. If a plan exists, it may be printed before the diagnostic. Previously published artifacts remain; there is no transaction\-wide rollback.
@@ -196,6 +226,8 @@ Configuration, integrity, approval\-drift, execution, or output error. If a plan
 .SS "2"
 .PP
 Evaluation completed with remaining requirements. In a plan, this includes artifacts proposed for installation. In an installation, inspect each decision to distinguish verified success from unresolved work.
+.PP
+For \fBresolve\fR, 2 means no requirement is covered. For handoff/preflight, 2 means pending or partial verified work.
 .PP
 .SH "EXAMPLES"
 .PP
@@ -242,7 +274,7 @@ archer i \-\-offline \-\-home /path/to/archer\-state
 .PP
 .SH "LIMITATIONS"
 .PP
-Composer/npm dependency solving and installation, archive extraction, autoload generation, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, and Slipstream worker handoffs are not implemented in 0.1.0. The JSON \fBai_eligible\fR field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
+Composer/npm dependency solving and installation, archive extraction, autoload generation, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, PHP manifest execution, and automatic worker callbacks are not implemented. The JSON \fBai_eligible\fR field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
 .PP
 Remembered context affects service ordering but never replaces a current health, probe, or hash check. Early installation failures report a partial plan, including prior verified successes, without recording those outcomes into context. Abandoned artifact and context locks require inspection; Archer reports a bounded error rather than automatically deleting them.
 .PP

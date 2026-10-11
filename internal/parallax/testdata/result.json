@@ -1,0 +1,30 @@
+{
+  "schema": "parallax.handoff-result/v1",
+  "handoff_id": "handoff-1",
+  "owner": "archer",
+  "status": "partial",
+  "satisfied": [
+    "laravel",
+    "relay"
+  ],
+  "remaining": [
+    "custom-community-ranking"
+  ],
+  "artifacts": [],
+  "next_owner": "slipstream",
+  "evidence": [
+    {
+      "type": "verification",
+      "capability": "laravel",
+      "status": "ok"
+    },
+    {
+      "type": "verification",
+      "capability": "relay",
+      "status": "ok"
+    }
+  ],
+  "x-provider": {
+    "version": 1
+  }
+}

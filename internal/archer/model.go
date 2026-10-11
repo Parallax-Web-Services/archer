@@ -57,6 +57,7 @@ type Decision struct {
 	Path        string      `json:"path,omitempty"`
 	Cached      bool        `json:"cached,omitempty"`
 	AIEligible  bool        `json:"ai_eligible,omitempty"`
+	Discovery   string      `json:"discovery"`
 }
 type Plan struct {
 	Schema     string             `json:"schema"`

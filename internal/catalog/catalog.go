@@ -21,6 +21,10 @@ import (
 const (
 	cacheTTL = 300 * time.Second
 	maxBody  = 2 * 1024 * 1024
+
+	StateFresh       = "fresh"
+	StateStale       = "stale"
+	StateUnavailable = "unavailable"
 )
 
 type Service struct {
@@ -36,6 +40,7 @@ type Service struct {
 type Snapshot struct {
 	Services []Service `json:"services"`
 	Stale    bool      `json:"stale"`
+	State    string    `json:"state"`
 	Source   string    `json:"source"`
 	Error    string    `json:"error,omitempty"`
 }
@@ -49,16 +54,19 @@ type cacheEntry struct {
 // Failed refreshes may return a stale snapshot with Error populated and no error.
 // Remote catalog data can never choose an environment variable for credentials.
 func Fetch(ctx context.Context, source, cacheRoot string) (Snapshot, error) {
+	unavailable := func(err error) (Snapshot, error) {
+		return Snapshot{Services: []Service{}, Source: source, Stale: true, State: StateUnavailable, Error: err.Error()}, err
+	}
 	u, err := checkedURL(source)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("catalog URL: %w", err)
+		return unavailable(fmt.Errorf("catalog URL: %w", err))
 	}
 	token, team := catalogCredentials(u)
 	if err := checkToken(token); err != nil {
-		return Snapshot{}, err
+		return unavailable(err)
 	}
 	if strings.ContainsAny(team, "\r\n") {
-		return Snapshot{}, errors.New("configured team contains invalid characters")
+		return unavailable(errors.New("configured team contains invalid characters"))
 	}
 	cachePath := ""
 	if cacheRoot != "" {
@@ -78,10 +86,11 @@ func Fetch(ctx context.Context, source, cacheRoot string) (Snapshot, error) {
 		if cacheOK {
 			snapshot := cached.Snapshot
 			snapshot.Stale = true
+			snapshot.State = StateStale
 			snapshot.Error = reason.Error()
 			return snapshot, nil
 		}
-		return Snapshot{}, reason
+		return unavailable(reason)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
@@ -265,6 +274,13 @@ func readCache(path, source string) (cacheEntry, bool) {
 	for i := range entry.Snapshot.Services {
 		entry.Snapshot.Services[i].TokenEnv = ""
 	}
+	// Upgrade caches written before the explicit state field was introduced.
+	if entry.Snapshot.State == "" {
+		entry.Snapshot.State = StateFresh
+		if entry.Snapshot.Stale {
+			entry.Snapshot.State = StateStale
+		}
+	}
 	return entry, true
 }
 
@@ -307,7 +323,7 @@ func parse(data []byte, source string) (Snapshot, error) {
 	if err := json.Unmarshal(data, &root); err != nil || root == nil {
 		return Snapshot{}, errors.New("expected a JSON object")
 	}
-	snapshot := Snapshot{Services: []Service{}, Source: source}
+	snapshot := Snapshot{Services: []Service{}, Source: source, State: StateFresh}
 	if raw, ok := root["stale"]; ok {
 		if err := json.Unmarshal(raw, &snapshot.Stale); err != nil {
 			return Snapshot{}, errors.New("stale must be boolean")
@@ -328,9 +344,13 @@ func parse(data []byte, source string) (Snapshot, error) {
 				// Preserve candidates, but use the same conservative execution
 				// gate as a failed refresh rather than licensing installation/AI.
 				snapshot.Stale = true
+				snapshot.State = StateUnavailable
 				snapshot.Error = "catalog reports an unavailable provider"
 			}
 		}
+	}
+	if snapshot.Stale && snapshot.State != StateUnavailable {
+		snapshot.State = StateStale
 	}
 	if raw, ok := root["schema"]; ok {
 		var schema string

@@ -1,0 +1,23 @@
+{
+  "schema": "parallax.handoff/v1",
+  "handoff_id": "handoff-1",
+  "mission_id": "mission-1",
+  "step_id": "deps",
+  "parent_step_id": null,
+  "from": "slipstream",
+  "to": "archer",
+  "owner": "archer",
+  "objective": "Install reusable capabilities",
+  "requires": [
+    "laravel",
+    "relay",
+    "custom-community-ranking"
+  ],
+  "context_refs": [
+    "workstream:123"
+  ],
+  "attempt": 1,
+  "x-trace": {
+    "project": "demo"
+  }
+}

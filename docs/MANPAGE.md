@@ -1,6 +1,9 @@
 # ARCHER 1
 
-Archer 0.1.0. User Commands. 11 October 2026.
+Archer 0.1.0-dev. User Commands. 11 October 2026.
+
+This reference includes unreleased protocol extensions in the current source.
+The existing local v0.1.0 release binaries predate those commands.
 
 ## NAME
 
@@ -14,6 +17,10 @@ archer plan [CAPABILITY ...] [OPTIONS]
 archer install [CAPABILITY ...] [OPTIONS]
 archer i [CAPABILITY ...] [OPTIONS]
 archer doctor [CAPABILITY ...] [OPTIONS]
+archer capabilities [--project DIR] [--json]
+archer resolve [CAPABILITY ...] [OPTIONS]
+archer resolve --stdin [OPTIONS]
+archer install --stdin [--preflight] [OPTIONS]
 archer context [--project DIR] [--home DIR]
 archer version
 archer help
@@ -23,11 +30,11 @@ archer --help
 
 ## DESCRIPTION
 
-Archer prepares project capabilities by checking existing services and local software before obtaining new artifacts. Requirements come from `archer.json` in the selected project directory. Positional capability names replace that file's requirement list for the current invocation; they do not add to it.
+Archer prepares project capabilities by checking existing services and local software before obtaining new artifacts. Requirements come from `archer.json` in the selected project directory. Positional capability names replace that file's requirement list for the current invocation; they do not add to it. Matching selectors retain the declared delivery and version policy.
 
-For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Stale configured discovery blocks unrestricted fallback.
+For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Missing, stale, or unavailable configured discovery blocks unrestricted fallback. Use `delivery: local` for an explicitly local-only artifact requirement.
 
-This version installs individual raw executable artifacts. Composer/npm package requirements and non-package version constraints remain unresolved. It makes no model calls and does not automatically hand remaining work to Slipstream.
+This version installs individual raw executable artifacts. Composer/npm package requirements and non-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
 
 ## COMMANDS
 
@@ -59,6 +66,22 @@ Alias for `plan`. It evaluates the selected requirements rather than inspecting 
 
 Print project-scoped provider bindings, context revision, and recent verified outcomes as JSON. An `archer.json` configuration is required. No probes or catalog requests run. This command does not change context.
 
+### capabilities
+
+Print configured capability advertisements as a JSON array without probes or catalog requests. A native project configuration is required. Descriptors advertise potential routes rather than current installed state.
+
+### resolve
+
+Print `parallax.resolution/v1` JSON, including verified satisfaction, installable work, unresolved requirements, and a portable native approval. With `--stdin`, read an object containing `requirements` and optional `context`. Otherwise use selected project requirements. Parallax capability names use the lowercase machine-slug grammar; local package identifiers such as `npm:react` are not v1 protocol requirements.
+
+Resolution status counts installable routes as covered. It does not claim installation. `context.probe_installed: false` suppresses planning-host local probes and installed-state claims.
+
+### install with --stdin
+
+Read a `parallax.handoff/v1` request addressed to and owned by `archer`. Require its complete `context.approved_resolution` object with schema `archer.approval/v1` and native `recipe_schema: archer.project/v1`. Validate integrity, approved scope, definitions, and routes before execution. Return an evidence-backed `parallax.handoff-result/v1` partition, including remaining work and the next owner.
+
+PHP `archer/v1` installer approvals describe a different executor and are rejected before probes. The current adapter handles native service health, local probes, and raw executable recipes. See `docs/PROTOCOL.md` for the compatibility boundary.
+
 ### version
 
 Print the executable's version and exit. Also available as `--version`.
@@ -86,6 +109,14 @@ Print plan, doctor, or installation output as `archer.plan/v1` JSON instead of t
 ### --plan
 
 For `install` or `i`, perform the same evaluation as `plan` without obtaining or publishing artifacts. This is not a prohibition on health requests, catalog-cache updates, or configured probes.
+
+### --stdin
+
+For `resolve`, read a resolution request. For `install` or `i`, read a Parallax handoff. Input must be one UTF-8 JSON object, at most 2 MiB, with bounded nesting and no duplicate keys or trailing second object. Protocol responses always use JSON. Positional selectors, `--plan`, and local `--approval PLAN_ID` cannot be combined with stdin requests.
+
+### --preflight
+
+Require `install --stdin` or `i --stdin`. Verify frozen native routes without downloading or publishing artifacts, refreshing catalog cache, or writing context. Missing readiness returns pending work with exit status 2. Caller assertions about installed software do not establish readiness.
 
 ### --offline
 
@@ -191,6 +222,8 @@ SCOPE_KEY is derived from the explicit project scope and canonical absolute proj
 
 Command completed successfully. For plan, doctor, and installation, all selected requirements are satisfied. An empty requirement set is satisfied.
 
+For `resolve`, status `satisfied` or `partial` returns 0 because installable routes count as coverage. Its `satisfied` array still contains only verified state.
+
 ### 1
 
 Configuration, integrity, approval-drift, execution, or output error. If a plan exists, it may be printed before the diagnostic. Previously published artifacts remain; there is no transaction-wide rollback.
@@ -198,6 +231,8 @@ Configuration, integrity, approval-drift, execution, or output error. If a plan 
 ### 2
 
 Evaluation completed with remaining requirements. In a plan, this includes artifacts proposed for installation. In an installation, inspect each decision to distinguish verified success from unresolved work.
+
+For `resolve`, 2 means no requirement is covered. For handoff/preflight, 2 means pending or partial verified work.
 
 ## EXAMPLES
 
@@ -244,7 +279,7 @@ archer i --offline --home /path/to/archer-state
 
 ## LIMITATIONS
 
-Composer/npm dependency solving and installation, archive extraction, autoload generation, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, and Slipstream worker handoffs are not implemented in 0.1.0. The JSON `ai_eligible` field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
+Composer/npm dependency solving and installation, archive extraction, autoload generation, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, PHP manifest execution, and automatic worker callbacks are not implemented. The JSON `ai_eligible` field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
 
 Remembered context affects service ordering but never replaces a current health, probe, or hash check. Early installation failures report a partial plan, including prior verified successes, without recording those outcomes into context. Abandoned artifact and context locks require inspection; Archer reports a bounded error rather than automatically deleting them.
 

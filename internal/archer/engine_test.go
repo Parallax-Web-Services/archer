@@ -38,6 +38,42 @@ func artifact(t *testing.T) store.Artifact {
 	}
 	return store.Artifact{URL: path, SHA256: digest(b)}
 }
+
+func TestPlanRejectsUnboundedOrNonFileSourcesBeforeDiscovery(t *testing.T) {
+	for _, directory := range []bool{false, true} {
+		t.Run(fmt.Sprint("directory=", directory), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
+			defer server.Close()
+			p := project()
+			p.Services = []catalog.Service{{ID: "relay", Provides: []string{"database"}, Endpoint: server.URL, HealthURL: server.URL}}
+			e := engine(t, p)
+			path := filepath.Join(e.ProjectDir, "package-lock.json")
+			if directory {
+				if err := os.Mkdir(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				f, err := os.Create(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := f.Truncate(maxProjectSourceBytes + 1); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := e.Plan(context.Background(), nil); err == nil {
+				t.Fatal("unsafe source accepted")
+			}
+			if calls.Load() != 0 {
+				t.Fatal("discovery ran before source validation")
+			}
+		})
+	}
+}
 func TestServiceFirstNoInstallOrAI(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(200) }))
@@ -50,7 +86,7 @@ func TestServiceFirstNoInstallOrAI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Decisions[0].Status != "service" || len(result.Remaining) != 0 || result.AIRequests != 0 {
+	if result.Decisions[0].Status != "service" || result.Decisions[0].Discovery != "bound" || len(result.Remaining) != 0 || result.AIRequests != 0 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if _, err := os.Stat(e.target(p.Recipes[0])); !os.IsNotExist(err) {
@@ -81,6 +117,7 @@ func TestUnavailableKnownServiceBlocksDuplicateInstall(t *testing.T) {
 }
 func TestArtifactWarmCacheAndFreshInstalledVerification(t *testing.T) {
 	p := project()
+	p.Requirements[0].Delivery = "local"
 	p.Recipes = []Recipe{{ID: "binary", Provides: []string{"database"}, Filename: "database", Artifact: artifact(t)}}
 	e := engine(t, p)
 	result, err := e.Install(context.Background(), nil, "")
@@ -124,7 +161,7 @@ func TestLocalProbeIsLiveOnEveryPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Decisions[0].Status != "local" {
+	if result.Decisions[0].Status != "local" || result.Decisions[0].Discovery != "local" {
 		t.Fatal(result)
 	}
 	e.Project.Local[0].Probe.Argv = []string{"archer-does-not-exist-12345"}
@@ -159,7 +196,7 @@ func TestRemoteServiceCannotSubstituteForPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Decisions[0].Status != "unresolved" || result.Decisions[0].AIEligible {
+	if result.Decisions[0].Status != "unresolved" || result.Decisions[0].AIEligible || result.Decisions[0].Discovery != "not_applicable" {
 		t.Fatal(result)
 	}
 }
@@ -203,7 +240,7 @@ func TestPlanDoesNotPersistContext(t *testing.T) {
 
 func TestPartialInstallReturnsExactRemainingPartition(t *testing.T) {
 	p := project()
-	p.Requirements = []Requirement{{Capability: "first"}, {Capability: "second"}}
+	p.Requirements = []Requirement{{Capability: "first", Delivery: "local"}, {Capability: "second", Delivery: "local"}}
 	first, second := artifact(t), artifact(t)
 	second.SHA256 = strings.Repeat("a", 64)
 	p.Recipes = []Recipe{{ID: "first", Provides: []string{"first"}, Filename: "first", Artifact: first}, {ID: "second", Provides: []string{"second"}, Filename: "second", Artifact: second}}
@@ -291,7 +328,7 @@ func TestAdvertisedServiceNeedsAnExplicitBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Decisions[0].Status != "unresolved" || result.Decisions[0].AIEligible {
+	if result.Decisions[0].Status != "unresolved" || result.Decisions[0].AIEligible || result.Decisions[0].Discovery != "fresh_match" {
 		t.Fatal("advertisement was mistaken for configured access", result)
 	}
 	p.Services = []catalog.Service{{ID: "relay", Provides: []string{"database"}, Endpoint: source, HealthURL: source + "/health", TokenEnv: "ARCHER_TEST_MISSING_CREDENTIAL"}}
@@ -319,4 +356,147 @@ func TestContextRefusesSymlinkedDirectory(t *testing.T) {
 	if err != nil || len(entries) > 0 {
 		t.Fatal("outside directory was modified")
 	}
+}
+
+func TestNoCatalogDoesNotAuthorizeInstallationOrGeneration(t *testing.T) {
+	p := project()
+	p.Requirements = append(p.Requirements, Requirement{Capability: "unknown"})
+	p.Recipes = []Recipe{{ID: "duplicate", Provides: []string{"database"}, Filename: "database", Artifact: artifact(t)}}
+	e := engine(t, p)
+	result, err := e.Install(context.Background(), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Catalogs) != 0 || len(result.Remaining) != 2 || result.AIRequests != 0 {
+		t.Fatalf("unexpected incomplete discovery result: %+v", result)
+	}
+	for _, decision := range result.Decisions {
+		if decision.Status != "unresolved" || decision.AIEligible || decision.Discovery != "not_configured" || !strings.Contains(decision.Reason, "not configured") {
+			t.Fatalf("missing catalogs were mistaken for complete discovery: %+v", decision)
+		}
+	}
+	if _, err := os.Stat(e.target(p.Recipes[0])); !os.IsNotExist(err) {
+		t.Fatal("unknown discovery caused an installation")
+	}
+}
+
+func TestExplicitLocalPolicyAllowsInstallationWithoutCatalogs(t *testing.T) {
+	p := project()
+	p.Requirements[0].Delivery = "local"
+	p.Recipes = []Recipe{{ID: "local-database", Provides: []string{"database"}, Filename: "database", Artifact: artifact(t)}}
+	result, err := engine(t, p).Install(context.Background(), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision := result.Decisions[0]; decision.Status != "installed" || decision.Discovery != "local" || decision.AIEligible {
+		t.Fatalf("explicit local policy did not permit deterministic installation: %+v", decision)
+	}
+}
+
+func TestCatalogCoverageDistinguishesFreshEmptyAndUnknown(t *testing.T) {
+	tests := []struct {
+		name, body, wantState string
+		status                int
+		allowFallback         bool
+	}{
+		{"fresh empty", `{"schema":"archer.catalog/v1","services":[]}`, "fresh_no_match", http.StatusOK, true},
+		{"stale empty", `{"schema":"archer.catalog/v1","services":[],"stale":true}`, catalog.StateStale, http.StatusOK, false},
+		{"provider unavailable", `{"capabilities":[],"providers":{"parallax":{"available":false}}}`, catalog.StateUnavailable, http.StatusOK, false},
+		{"fetch unavailable", ``, catalog.StateUnavailable, http.StatusServiceUnavailable, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			p := project()
+			p.Requirements = append(p.Requirements, Requirement{Capability: "unknown"})
+			p.Registries = []string{server.URL}
+			p.Recipes = []Recipe{{ID: "database", Provides: []string{"database"}, Filename: "database", Artifact: artifact(t)}}
+			result, err := engine(t, p).Plan(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, decision := range result.Decisions {
+				if decision.Discovery != test.wantState {
+					t.Fatalf("wrong discovery state: %+v", decision)
+				}
+			}
+			if (result.Decisions[0].Status == "install") != test.allowFallback || result.Decisions[1].AIEligible != test.allowFallback {
+				t.Fatalf("fallback disagrees with discovery evidence: %+v", result)
+			}
+			if !test.allowFallback && result.Decisions[0].AIEligible {
+				t.Fatal("unknown discovery authorized generation")
+			}
+		})
+	}
+}
+
+func TestFreshOneSourceCannotHideAnotherUnavailableSource(t *testing.T) {
+	fresh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"schema":"archer.catalog/v1","services":[]}`))
+	}))
+	defer fresh.Close()
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
+	defer unavailable.Close()
+	for _, sources := range [][]string{{fresh.URL, unavailable.URL}, {unavailable.URL, fresh.URL}} {
+		p := project()
+		p.Registries = sources
+		p.Recipes = []Recipe{{ID: "database", Provides: []string{"database"}, Filename: "database", Artifact: artifact(t)}}
+		result, err := engine(t, p).Plan(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decision := result.Decisions[0]; decision.Status != "unresolved" || decision.AIEligible || decision.Discovery != catalog.StateUnavailable {
+			t.Fatalf("partial freshness authorized fallback: %+v", decision)
+		}
+	}
+}
+
+func TestRemotePlanningCannotClaimItsOwnLocalEnvironment(t *testing.T) {
+	p := project()
+	p.Requirements[0].Delivery = "local"
+	p.Recipes = []Recipe{{ID: "database", Provides: []string{"database"}, Filename: "database", Artifact: artifact(t)}}
+	e := engine(t, p)
+	installed, err := e.Install(context.Background(), nil, "")
+	if err != nil || installed.Decisions[0].Status != "installed" {
+		t.Fatalf("managed fixture was not installed: %+v %v", installed, err)
+	}
+	marker := filepath.Join(t.TempDir(), "probe-executed")
+	t.Setenv("ARCHER_DISCOVERY_PROBE_MARKER", marker)
+	e.Project.Local = []LocalCapability{{ID: "host-database", Provides: []string{"database"}, Probe: Probe{Argv: []string{os.Args[0], "-test.run=^TestDiscoveryProbeHelper$"}, Contains: "probe executed"}}}
+	e.SkipLocalVerification = true
+	remote, err := e.Plan(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision := remote.Decisions[0]; decision.Status != "install" || !decision.Cached {
+		t.Fatalf("planning host falsely established worker installation: %+v", decision)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("remote route planning executed a local probe")
+	}
+	// The same command is a real successful probe when local verification is
+	// enabled, ensuring the earlier absence was not merely a broken fixture.
+	e.SkipLocalVerification = false
+	live, err := e.Plan(context.Background(), nil)
+	if err != nil || live.Decisions[0].Status != "local" {
+		t.Fatalf("live host verification did not run: %+v %v", live, err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("live probe left no evidence of execution", err)
+	}
+}
+
+func TestDiscoveryProbeHelper(t *testing.T) {
+	marker := os.Getenv("ARCHER_DISCOVERY_PROBE_MARKER")
+	if marker == "" {
+		return
+	}
+	if err := os.WriteFile(marker, []byte("probe executed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("probe executed")
 }

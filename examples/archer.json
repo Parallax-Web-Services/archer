@@ -6,7 +6,10 @@
       "capability": "database",
       "delivery": "service"
     },
-    "php"
+    {
+      "capability": "php",
+      "delivery": "local"
+    }
   ],
   "services": [
     {

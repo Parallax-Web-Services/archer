@@ -11,6 +11,11 @@ manpage source is [archer.1](docs/archer.1).
 
 On a Unix system with `man` available, read it with `man -l docs/archer.1`.
 
+The current source includes the [Parallax worker adapter](docs/PROTOCOL.md):
+`capabilities`, `resolve --stdin`, approved `install --stdin`, and read-only
+`install --preflight --stdin`. It uses native `archer.project/v1` definitions;
+PHP installer approvals cannot authorize different Go recipes.
+
 Archer is a clean-sheet, dependency-free Go CLI. The executable needs no PHP,
 Node, Composer, npm, Docker, Kubernetes or system package manager to start.
 
@@ -24,7 +29,9 @@ The first milestone implements an explicit decision order:
 
 A known service that needs configuration or fails verification blocks a duplicate
 installation. Stale or unavailable service discovery does not justify installation
-or generation. Package requirements cannot be satisfied by a similarly named
+or generation. Missing configured discovery also blocks unrestricted installation;
+use an explicit `delivery: local` requirement for a local-only artifact route.
+Package requirements cannot be satisfied by a similarly named
 remote API. **There are no model calls in this version.**
 
 ## Use the local build
