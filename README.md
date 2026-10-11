@@ -2,6 +2,10 @@
 
 Straight & steady. One installer for Zefram and the Parallax ecosystem.
 
+Read the [product and technical design](docs/DESIGN.md) for the complete product
+contract, current boundaries, Slipstream integration, caching architecture, and
+the acceptance gates for a working Zefram environment.
+
 Archer is a clean-sheet, dependency-free Go CLI. The executable needs no PHP,
 Node, Composer, npm, Docker, Kubernetes or system package manager to start.
 
