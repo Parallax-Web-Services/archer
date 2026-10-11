@@ -1,0 +1,36 @@
+{
+  "schema": "archer.project/v1",
+  "scope": "zefram-example",
+  "requirements": [
+    {
+      "capability": "database",
+      "delivery": "service"
+    },
+    "php"
+  ],
+  "services": [
+    {
+      "id": "existing-database",
+      "provides": [
+        "database"
+      ],
+      "endpoint": "https://your-configured-service.example",
+      "health_url": "https://your-configured-service.example/health"
+    }
+  ],
+  "local": [
+    {
+      "id": "php-runtime",
+      "provides": [
+        "php"
+      ],
+      "probe": {
+        "argv": [
+          "php",
+          "--version"
+        ],
+        "contains": "PHP"
+      }
+    }
+  ]
+}
