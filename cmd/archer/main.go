@@ -110,7 +110,7 @@ func runWithInput(args []string, in io.Reader, out, errout io.Writer) int {
 Usage:
   archer init                         inspect project package manifests and create archer.json
   archer plan [capability ...]         verify service/local reuse and explain remaining work
-  archer i [capability ...]            reuse or install checksum-pinned artifacts
+  archer i [capability ...]            replay locked npm packages or install pinned artifacts
   archer i --plan                      inspect without downloading or installing artifacts
   archer context                       show remembered project-scoped outcomes
   archer capabilities --json           advertise configured capability descriptors

@@ -16,6 +16,12 @@ The current source includes the [Parallax worker adapter](docs/PROTOCOL.md):
 `install --preflight --stdin`. It uses native `archer.project/v1` definitions;
 PHP installer approvals cannot authorize different Go recipes.
 
+The current source also includes [frozen npm v3 replay](docs/NPM.md). Selecting
+a direct `npm:` requirement verifies and installs its whole locked dependency
+tree with SHA-512 integrity. Lifecycle scripts and version solving are unsupported.
+The [Zefram acceptance record](docs/VALIDATION.md) reports the real fixture's
+18 passing JavaScript tests, three passing frontend builds, and offline replay.
+
 Archer is a clean-sheet, dependency-free Go CLI. The executable needs no PHP,
 Node, Composer, npm, Docker, Kubernetes or system package manager to start.
 
@@ -36,7 +42,14 @@ remote API. **There are no model calls in this version.**
 
 ## Use the local build
 
-The repository's first release artifacts are built locally, not published:
+Build current source for the protocol and npm commands:
+
+```sh
+go build -trimpath -buildvcs=false -o dist/archer ./cmd/archer
+dist/archer version
+```
+
+The first local release artifacts below predate these extensions and are not published:
 
 ```sh
 ./dist/v0.1.0/archer_linux_amd64 version
@@ -57,8 +70,8 @@ verified bytes are published.
 
 `archer init` reads Composer/npm manifests and preserves package names and version
 constraints in `archer.json`. It refuses to overwrite an existing configuration.
-Package dependency solving, archive extraction, autoload generation and lifecycle
-hooks are not implemented yet. Such requirements stay unresolved.
+Supported npm v3 locks can now be replayed directly. Composer installation,
+dependency solving, autoload generation and lifecycle hooks remain subsequent work.
 
 ## Direct bootstrap distribution
 

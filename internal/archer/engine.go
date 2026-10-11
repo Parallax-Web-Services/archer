@@ -88,11 +88,16 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	if err != nil {
 		return Plan{}, err
 	}
+	npmPlan, npmDecisions, err := e.npmPlan(requirements)
+	if err != nil {
+		return Plan{}, err
+	}
 	profile, err := e.Context()
 	if err != nil {
 		return Plan{}, err
 	}
 	plan := Plan{Schema: "archer.plan/v1", Scope: e.Project.Scope, Platform: runtime.GOOS + "/" + runtime.GOARCH, Decisions: []Decision{}, Remaining: []Requirement{}}
+	plan.NPM = npmPlan
 	services := append([]catalog.Service{}, e.Project.Services...)
 	bindings := map[string]catalog.Service{}
 	for _, service := range e.Project.Services {
@@ -104,7 +109,17 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	if len(e.Project.Registries) > 0 {
 		discoveryState = catalog.StateFresh
 	}
-	for _, url := range e.Project.Registries {
+	discoverySources := e.Project.Registries
+	needsDiscovery := false
+	for _, r := range requirements {
+		if !packageRequirement(r) && r.Delivery != "local" {
+			needsDiscovery = true
+		}
+	}
+	if !needsDiscovery {
+		discoverySources = nil
+	}
+	for _, url := range discoverySources {
 		var snapshot catalog.Snapshot
 		if e.Offline {
 			snapshot = catalog.Snapshot{Source: url, Stale: true, State: catalog.StateUnavailable, Error: "catalog refresh disabled in offline mode"}
@@ -129,6 +144,13 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	discoveryUnknown := discoveryState != catalog.StateFresh
 	sort.SliceStable(services, func(i, j int) bool { return services[i].ID < services[j].ID })
 	for _, r := range requirements {
+		if d, ok := npmDecisions[npmDecisionKey(r)]; ok {
+			plan.Decisions = append(plan.Decisions, d)
+			if pendingDecision(d) {
+				plan.Remaining = append(plan.Remaining, r)
+			}
+			continue
+		}
 		state := discoveryState
 		if state == catalog.StateFresh {
 			state = "fresh_no_match"
@@ -226,7 +248,7 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 			d.Discovery = "not_applicable"
 		}
 		plan.Decisions = append(plan.Decisions, d)
-		if d.Status == "unresolved" || d.Status == "install" {
+		if pendingDecision(d) {
 			plan.Remaining = append(plan.Remaining, r)
 		}
 	}
@@ -250,7 +272,11 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 		Sources  map[string]string
 		Platform string
 		Services []catalog.Service
-	}{e.Project, routes, e.scopeKey, profile.Revision, sources, plan.Platform, services}
+		NPM      string
+	}{e.Project, routes, e.scopeKey, profile.Revision, sources, plan.Platform, services, ""}
+	if npmPlan != nil {
+		identity.NPM = npmPlan.ID
+	}
 	b, _ := json.Marshal(identity)
 	plan.ID = digest(b)
 	return plan, nil
@@ -288,11 +314,15 @@ func verifiedTarget(path, want string) bool {
 func refreshRemaining(plan Plan) Plan {
 	plan.Remaining = []Requirement{}
 	for _, d := range plan.Decisions {
-		if d.Status == "unresolved" || d.Status == "install" {
+		if pendingDecision(d) {
 			plan.Remaining = append(plan.Remaining, d.Requirement)
 		}
 	}
 	return plan
+}
+
+func pendingDecision(d Decision) bool {
+	return d.Status == "unresolved" || d.Status == "install" || d.Status == "npm_install" || d.Status == "npm_skipped"
 }
 
 const maxProjectSourceBytes = 16 << 20
@@ -364,6 +394,21 @@ func (e *Engine) Install(ctx context.Context, requirements []Requirement, approv
 	if approval != "" && approval != plan.ID {
 		return plan, fmt.Errorf("plan changed since approval; review a fresh plan")
 	}
+	if plan.NPM != nil {
+		report, err := e.installNPM(ctx, plan.NPM)
+		plan.NPMReport = &report
+		if err != nil {
+			return refreshRemaining(plan), fmt.Errorf("replay npm lock: %w", err)
+		}
+		for i, d := range plan.Decisions {
+			if d.Status == "npm_install" {
+				plan.Decisions[i].Status = "npm_installed"
+				plan.Decisions[i].Reason = "verified full frozen npm dependency tree; no lifecycle scripts executed and runtime compatibility is untested"
+				plan.Decisions[i].Evidence = "npm-plan:" + plan.NPM.ID
+				plan.Decisions[i].Cached = report.Downloaded == 0
+			}
+		}
+	}
 	for i, d := range plan.Decisions {
 		if d.Status != "install" {
 			continue
@@ -394,7 +439,7 @@ func (e *Engine) Install(ctx context.Context, requirements []Requirement, approv
 	}
 	plan.Remaining = []Requirement{}
 	for _, d := range plan.Decisions {
-		if d.Status == "unresolved" || d.Status == "install" {
+		if pendingDecision(d) {
 			plan.Remaining = append(plan.Remaining, d.Requirement)
 		}
 	}

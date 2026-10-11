@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Parallax-Web-Services/archer/internal/catalog"
+	"github.com/Parallax-Web-Services/archer/internal/npm"
 	"github.com/Parallax-Web-Services/archer/internal/store"
 	"regexp"
 	"strings"
@@ -68,6 +69,8 @@ type Plan struct {
 	Catalogs   []catalog.Snapshot `json:"catalogs,omitempty"`
 	Remaining  []Requirement      `json:"remaining"`
 	AIRequests int                `json:"ai_requests"`
+	NPM        *npm.Plan          `json:"npm,omitempty"`
+	NPMReport  *npm.Report        `json:"npm_report,omitempty"`
 }
 type Context struct {
 	Schema   string            `json:"schema"`

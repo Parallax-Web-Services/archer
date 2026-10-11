@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -101,14 +102,24 @@ func (e *Engine) record(plan Plan) error {
 	lock := e.contextPath() + ".lock"
 	deadline := time.Now().Add(5 * time.Second)
 	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("context is locked; inspect abandoned lock %s", lock)
+		}
 		err := os.Mkdir(lock, 0700)
 		if err == nil {
 			break
 		}
-		if !errors.Is(err, os.ErrExist) {
+		// Windows can report access denied while another process's directory
+		// deletion is pending. Treat this as bounded contention, never ownership.
+		pendingDelete := runtime.GOOS == "windows" && errors.Is(err, os.ErrPermission)
+		if !errors.Is(err, os.ErrExist) && !pendingDelete {
 			return err
 		}
 		info, err := os.Lstat(lock)
+		if pendingDelete && errors.Is(err, os.ErrPermission) {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -127,7 +138,7 @@ func (e *Engine) record(plan Plan) error {
 	}
 	changed := false
 	for _, d := range plan.Decisions {
-		if d.Status != "service" && d.Status != "local" && d.Status != "installed" {
+		if d.Status != "service" && d.Status != "local" && d.Status != "installed" && d.Status != "npm_installed" {
 			continue
 		}
 		c.Bindings[d.Requirement.Capability] = d.Provider

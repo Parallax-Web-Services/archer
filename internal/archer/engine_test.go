@@ -190,14 +190,32 @@ func TestStaleDiscoveryCannotJustifyInstallationOrAI(t *testing.T) {
 }
 func TestRemoteServiceCannotSubstituteForPackage(t *testing.T) {
 	p := project()
-	p.Requirements = []Requirement{{Capability: "npm:react", Delivery: "package"}}
-	p.Services = []catalog.Service{{ID: "remote-react", Provides: []string{"npm:react"}}}
+	p.Requirements = []Requirement{{Capability: "composer:example/library", Delivery: "package"}}
+	p.Services = []catalog.Service{{ID: "remote-library", Provides: []string{"composer:example/library"}}}
 	result, err := engine(t, p).Plan(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Decisions[0].Status != "unresolved" || result.Decisions[0].AIEligible || result.Decisions[0].Discovery != "not_applicable" {
 		t.Fatal(result)
+	}
+}
+
+func TestPackageOnlyPlanDoesNotRefreshServiceCatalogs(t *testing.T) {
+	e, downloads := npmEngineFixture(t)
+	var catalogCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { catalogCalls.Add(1) }))
+	defer server.Close()
+	e.Project.Registries = []string{server.URL}
+	plan, err := e.Plan(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.NPM == nil || plan.Decisions[0].Status != "npm_install" {
+		t.Fatal(plan)
+	}
+	if catalogCalls.Load() != 0 || downloads.Load() != 0 {
+		t.Fatal("package planning fetched irrelevant services or artifacts")
 	}
 }
 func TestScopeAndSourceChangesInvalidateApproval(t *testing.T) {

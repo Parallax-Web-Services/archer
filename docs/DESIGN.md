@@ -5,7 +5,9 @@ Design baseline: 11 October 2026. Implemented baseline: [9192f3b](https://github
 The current checkout adds an initial [native worker adapter](PROTOCOL.md),
 strict handoff/approval validation, a PHP transport bridge, and explicit discovery
 states. That advances Gate 1; complete PHP recipe compatibility, catalog coverage,
-and functional service readiness still require implementation.
+and functional service readiness still require implementation. The checkout also
+adds [frozen npm v3 replay](NPM.md), the first portion of Gate 2. Managed runtimes,
+Composer installation, and full application readiness remain pending.
 
 Archer is the solo installer and environment coordinator for Zefram. A developer should be able to check out an application, run `archer i`, and receive a usable environment without personally operating Composer, npm, Docker, Kubernetes, or apt. Archer first asks what the project needs and what the user can already use. It connects a suitable existing service, reuses compatible local software and verified cached work, and installs or builds only what remains. Slipstream handles genuinely unresolved work after those routes have been exhausted.
 
@@ -46,7 +48,7 @@ For example, a project that needs PHP, Node, a frontend build, and a database sh
 
 The managed environment must also be usable. An installer cannot change its parent shell's PATH. The target `archer run <command ...>` launches application commands with the selected runtimes and environment; generated project launchers or explicit shell activation support direct use. The readiness check runs in that same environment. `archer run` and activation are proposed interfaces, not current commands. Today Archer prints managed binary paths for the user to add to PATH.
 
-That is a target scenario. Today, manifest import yields unresolved package requirements; raw executable recipes can be installed; a configured service can pass an HTTP health check. Today there is no runtime manager, package installer, frontend build executor, or application readiness orchestration.
+That is a target scenario. Current source can replay supported npm v3 locks, install raw executable recipes, and check a configured service's HTTP health. Composer requirements remain unresolved. There is no managed runtime manager, frontend build executor, or application readiness orchestration; a full PHP/Node environment still needs those parts.
 
 ## The implemented baseline
 
@@ -68,7 +70,7 @@ The source boundaries are small and explicit: [CLI](../cmd/archer/main.go), [pro
 
 ## Target architecture
 
-The core remains deterministic. Ecosystem-specific adapters supply discovery, compatibility, execution, and verification behind a shared plan. The diagram describes the target architecture; package, runtime, deployment, result-cache, and handoff components are pending.
+The core remains deterministic. Ecosystem-specific adapters supply discovery, compatibility, execution, and verification behind a shared plan. The diagram describes the target architecture. Native handoffs and an initial npm replay backend exist; full package compatibility, runtimes, deployment, result caching, and callback orchestration remain pending.
 
 ```mermaid
 flowchart TD
@@ -207,7 +209,7 @@ Checksums establish consistency with the manifest. Release trust also needs sign
 
 The baseline has 38 Go tests and 18 bootstrap cases exercised during development, plus native Windows/Linux installation and offline-reuse smoke checks. Tests cover service-before-install selection, stale discovery, package/service separation, approval drift, corrupted cache bytes, concurrent publication, scoped memory, and partial failures. Six artifacts were cross-built and hash checked. That evidence supports the small current boundary; it does not prove full package compatibility or speed superiority.
 
-Performance should be measured on the same real application, host, network conditions, and resulting dependency state. Compare Archer with the project's normal Composer/npm commands for cold installation, warm repeat, changed lock, offline warm installation, and concurrent projects sharing dependencies. Record elapsed time, bytes fetched, cache hits, executed build steps, peak resources, and model calls. Publish results with fixture and machine details. No Composer/npm speedup has been measured yet.
+Performance should be measured on the same real application, host, network conditions, and resulting dependency state. Compare Archer with the project's normal Composer/npm commands for cold installation, warm repeat, changed lock, offline warm installation, and concurrent projects sharing dependencies. Record elapsed time, bytes fetched, cache hits, executed build steps, peak resources, and model calls. Publish results with fixture and machine details. The [initial Zefram npm record](VALIDATION.md) captures cold and offline CLI timings with working frontend builds. No comparative Composer/npm speedup has been measured yet.
 
 The strongest first acceptance test is functional: on a fresh supported user environment, the real fixture becomes runnable using Archer alone; its existing Parallax service is reused; required packages and runtimes are ready; application tests pass; repeating the run fetches no unchanged artifact bytes and executes no unnecessary build. Offline testing applies to local work with complete cached inputs; it cannot assert live readiness of a remote service.
 

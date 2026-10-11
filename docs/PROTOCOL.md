@@ -84,4 +84,4 @@ Stdin accepts one UTF-8 JSON object of at most 2 MiB with bounded nesting, no du
 
 Resolution exits 0 for covered or partially covered plans and 2 when nothing is covered. Handoff/preflight exits 0 for verified completion, 2 for pending or partial work, and 1 for failure. Errors use one JSON response on stdout and diagnostics on stderr.
 
-Package installation, runtimes, PHP manifest compatibility, functional service readiness, and callbacks remain subsequent work. This slice establishes their transport, evidence, and approval boundary.
+Local project commands now support frozen npm v3 replay; package identifiers remain outside the v1 handoff grammar. Managed runtimes, Composer installation, PHP manifest compatibility, functional service readiness, and callbacks remain subsequent work. This slice establishes their transport, evidence, and approval boundary.

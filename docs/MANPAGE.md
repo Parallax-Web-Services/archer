@@ -2,8 +2,8 @@
 
 Archer 0.1.0-dev. User Commands. 11 October 2026.
 
-This reference includes unreleased protocol extensions in the current source.
-The existing local v0.1.0 release binaries predate those commands.
+This reference includes unreleased protocol and npm extensions in the current source.
+The existing local v0.1.0 release binaries predate those extensions.
 
 ## NAME
 
@@ -34,7 +34,7 @@ Archer prepares project capabilities by checking existing services and local sof
 
 For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Missing, stale, or unavailable configured discovery blocks unrestricted fallback. Use `delivery: local` for an explicitly local-only artifact requirement.
 
-This version installs individual raw executable artifacts. Composer/npm package requirements and non-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
+This version installs individual raw executable artifacts and replays supported npm v3 locked trees. Composer requirements and non-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
 
 ## COMMANDS
 
@@ -42,7 +42,7 @@ This version installs individual raw executable artifacts. Composer/npm package 
 
 Create `archer.json` in the selected project directory. Use the directory name as the initial scope. Read `require` and `require-dev` from `composer.json`, and `dependencies`, `devDependencies`, and `optionalDependencies` from `package.json`. Record package names and constraints as requirements prefixed with `composer:` or `npm:`.
 
-Existing configuration is never overwritten. Missing manifests are allowed; malformed declarations are errors. The import does not consume lockfile graphs or retain dependency-group distinctions. Imported package requirements need a future package resolver before installation.
+Existing configuration is never overwritten. Missing manifests are allowed; malformed declarations are errors. The import does not consume lockfile graphs or retain dependency-group distinctions. npm planning subsequently reads the complete manifest and v3 lock; Composer requirements remain unresolved.
 
 ### plan
 
@@ -52,7 +52,9 @@ Evaluate requirements and print a plan with current evidence and remaining work.
 
 Compute a fresh plan, obtain the selected pinned artifacts, verify their SHA-256 digests, and publish them into the project-scoped Archer bin directory. Existing matching managed files are reused after verification; conflicting files are preserved and cause an error. Installed binaries are not executed by the artifact installer.
 
-Installation is sequential. Earlier successful publications remain if a later step fails. After the installation loop completes, record verified service, local, and installed outcomes in scoped context. Unresolved requirements are reported and produce exit status 2.
+For a direct npm requirement, replay the whole supported v3 lock into project `node_modules`, including development dependencies and nested placements. Verify SHA-512 archives and stage the complete tree before publication. Existing managed trees are freshly verified; unmanaged, changed, and updated-lock trees are refused. Package code and lifecycle scripts are not executed. Recorded Node engine requirements are reported without runtime provisioning or independent range solving. See `docs/NPM.md`.
+
+Raw artifact publication is sequential; npm downloads use bounded concurrency. Earlier successful publications remain if a later backend fails. After installation completes, record verified service, local, and installed outcomes in scoped context. Unresolved requirements are reported and produce exit status 2.
 
 ### i
 
@@ -192,6 +194,15 @@ HOME/cache/sha256/PREFIX/DIGEST
 HOME/cache/locks/DIGEST
     Per-artifact download lock directories.
 
+HOME/cache/sha512/PREFIX/DIGEST
+    Verified npm archives; PREFIX is the digest's first two characters.
+
+PROJECT/node_modules/.archer-install.json
+    Frozen npm tree identity and inventory; verification also checks pinned archives.
+
+PROJECT/.archer-npm-install.lock
+    Project-level npm publication lock directory.
+
 HOME/catalogs/catalog/KEY.json
     Catalog metadata keyed by source and credential/team identity.
 
@@ -279,10 +290,10 @@ archer i --offline --home /path/to/archer-state
 
 ## LIMITATIONS
 
-Composer/npm dependency solving and installation, archive extraction, autoload generation, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, PHP manifest execution, and automatic worker callbacks are not implemented. The JSON `ai_eligible` field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
+Composer installation, dependency solving, PHP autoload generation, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, PHP manifest execution, and automatic worker callbacks are not implemented. npm replay requires a supported v3 registry lock; workspaces, native builds, updated-lock replacement, and Windows executable shims are unsupported. The JSON `ai_eligible` field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
 
 Remembered context affects service ordering but never replaces a current health, probe, or hash check. Early installation failures report a partial plan, including prior verified successes, without recording those outcomes into context. Abandoned artifact and context locks require inspection; Archer reports a bounded error rather than automatically deleting them.
 
 ## SEE ALSO
 
-Project README, `docs/DESIGN.md`, and `examples/archer.json` in the Archer repository: https://github.com/Parallax-Web-Services/archer.
+Project README, `docs/DESIGN.md`, `docs/PROTOCOL.md`, `docs/NPM.md`, and `examples/archer.json` in the Archer repository: https://github.com/Parallax-Web-Services/archer.
