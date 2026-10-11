@@ -6,6 +6,11 @@ Read the [product and technical design](docs/DESIGN.md) for the complete product
 contract, current boundaries, Slipstream integration, caching architecture, and
 the acceptance gates for a working Zefram environment.
 
+The [command manual](docs/MANPAGE.md) documents the shipped CLI. Its Unix
+manpage source is [archer.1](docs/archer.1).
+
+On a Unix system with `man` available, read it with `man -l docs/archer.1`.
+
 Archer is a clean-sheet, dependency-free Go CLI. The executable needs no PHP,
 Node, Composer, npm, Docker, Kubernetes or system package manager to start.
 
