@@ -2,7 +2,7 @@
 
 Archer 0.1.0-dev. User Commands. 11 October 2026.
 
-This reference includes unreleased protocol and npm extensions in the current source.
+This reference includes unreleased protocol and package extensions in the current source.
 The existing local v0.1.0 release binaries predate those extensions.
 
 ## NAME
@@ -34,7 +34,7 @@ Archer prepares project capabilities by checking existing services and local sof
 
 For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Missing, stale, or unavailable configured discovery blocks unrestricted fallback. Use `delivery: local` for an explicitly local-only artifact requirement.
 
-This version installs individual raw executable artifacts and replays supported npm v3 locked trees. Composer requirements and non-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
+This version installs individual raw executable artifacts and replays supported npm v3 and Composer locks. Non-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
 
 ## COMMANDS
 
@@ -42,7 +42,7 @@ This version installs individual raw executable artifacts and replays supported 
 
 Create `archer.json` in the selected project directory. Use the directory name as the initial scope. Read `require` and `require-dev` from `composer.json`, and `dependencies`, `devDependencies`, and `optionalDependencies` from `package.json`. Record package names and constraints as requirements prefixed with `composer:` or `npm:`.
 
-Existing configuration is never overwritten. Missing manifests are allowed; malformed declarations are errors. The import does not consume lockfile graphs or retain dependency-group distinctions. npm planning subsequently reads the complete manifest and v3 lock; Composer requirements remain unresolved.
+Existing configuration is never overwritten. Missing manifests are allowed; malformed declarations are errors. The import does not consume lockfile graphs or retain dependency-group distinctions. Package planning subsequently reads each complete manifest and supported lock.
 
 ### plan
 
@@ -54,7 +54,9 @@ Compute a fresh plan, obtain the selected pinned artifacts, verify their SHA-256
 
 For a direct npm requirement, replay the whole supported v3 lock into project `node_modules`, including development dependencies and nested placements. Verify SHA-512 archives and stage the complete tree before publication. Existing managed trees are freshly verified; unmanaged, changed, and updated-lock trees are refused. Package code and lifecycle scripts are not executed. Recorded Node engine requirements are reported without runtime provisioning or independent range solving. See `docs/NPM.md`.
 
-Raw artifact publication is sequential; npm downloads use bounded concurrency. Earlier successful publications remain if a later backend fails. After installation completes, record verified service, local, and installed outcomes in scoped context. Unresolved requirements are reported and produce exit status 2.
+For a direct Composer library requirement, replay the complete supported lock into `vendor`, including development dependencies, and generate PHP autoloading, installed metadata, and PHP binary proxies. Check the selected PHP interpreter and extensions against the complete graph. A directly selected PHP/extension requirement verifies runtime readiness without installing the library tree. Composer is not invoked. Default source policy requires locked SHA-1 distribution checksums; missing checksums need explicit `composer.source_policy` with `mode: source-reference` and trusted hosts. First-download SHA-256 receipts record local provenance and rely on those HTTPS hosts and local receipt trust. Scripts and plugins are skipped. See `docs/COMPOSER.md`.
+
+Raw artifact publication is sequential; package downloads use bounded concurrency. Earlier successful publications remain if a later backend fails. After installation completes, record verified service, local, and installed outcomes in scoped context. Unresolved requirements are reported and produce exit status 2.
 
 ### i
 
@@ -203,6 +205,18 @@ PROJECT/node_modules/.archer-install.json
 PROJECT/.archer-npm-install.lock
     Project-level npm publication lock directory.
 
+HOME/cache/composer/sources/PREFIX/IDENTITY
+    Composer ZIP archive and first-download provenance receipt for a source identity.
+
+PROJECT/vendor/.archer-install.json
+    Frozen Composer tree inventory; verification also checks cached ZIPs and receipts.
+
+PROJECT/vendor/autoload.php
+    Generated PHP autoloader entry point.
+
+PROJECT/.archer-composer-install.lock
+    Project-level Composer publication lock directory.
+
 HOME/catalogs/catalog/KEY.json
     Catalog metadata keyed by source and credential/team identity.
 
@@ -290,10 +304,10 @@ archer i --offline --home /path/to/archer-state
 
 ## LIMITATIONS
 
-Composer installation, dependency solving, PHP autoload generation, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, PHP manifest execution, and automatic worker callbacks are not implemented. npm replay requires a supported v3 registry lock; workspaces, native builds, updated-lock replacement, and Windows executable shims are unsupported. The JSON `ai_eligible` field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
+General dependency solving, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, legacy PHP installer manifest execution, and automatic worker callbacks are not implemented. npm replay requires a supported v3 registry lock; workspaces, native builds, updated-lock replacement, and Windows executable shims are unsupported. Composer replay requires stable GitHub ZIP distributions and a supported autoload profile; plugins, custom installers, platform overrides, broad root classmaps, and non-PHP executable proxies are unsupported. The JSON `ai_eligible` field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
 
 Remembered context affects service ordering but never replaces a current health, probe, or hash check. Early installation failures report a partial plan, including prior verified successes, without recording those outcomes into context. Abandoned artifact and context locks require inspection; Archer reports a bounded error rather than automatically deleting them.
 
 ## SEE ALSO
 
-Project README, `docs/DESIGN.md`, `docs/PROTOCOL.md`, `docs/NPM.md`, and `examples/archer.json` in the Archer repository: https://github.com/Parallax-Web-Services/archer.
+Project README, `docs/DESIGN.md`, `docs/PROTOCOL.md`, `docs/NPM.md`, `docs/COMPOSER.md`, and `examples/archer.json` in the Archer repository: https://github.com/Parallax-Web-Services/archer.

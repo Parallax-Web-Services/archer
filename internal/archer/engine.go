@@ -92,12 +92,17 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	if err != nil {
 		return Plan{}, err
 	}
+	composerPlan, composerRuntime, composerDecisions, err := e.composerPlan(ctx, requirements)
+	if err != nil {
+		return Plan{}, err
+	}
 	profile, err := e.Context()
 	if err != nil {
 		return Plan{}, err
 	}
 	plan := Plan{Schema: "archer.plan/v1", Scope: e.Project.Scope, Platform: runtime.GOOS + "/" + runtime.GOARCH, Decisions: []Decision{}, Remaining: []Requirement{}}
 	plan.NPM = npmPlan
+	plan.Composer, plan.ComposerRuntime = composerPlan, composerRuntime
 	services := append([]catalog.Service{}, e.Project.Services...)
 	bindings := map[string]catalog.Service{}
 	for _, service := range e.Project.Services {
@@ -144,6 +149,13 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	discoveryUnknown := discoveryState != catalog.StateFresh
 	sort.SliceStable(services, func(i, j int) bool { return services[i].ID < services[j].ID })
 	for _, r := range requirements {
+		if d, ok := composerDecisions[composerDecisionKey(r)]; ok {
+			plan.Decisions = append(plan.Decisions, d)
+			if pendingDecision(d) {
+				plan.Remaining = append(plan.Remaining, r)
+			}
+			continue
+		}
 		if d, ok := npmDecisions[npmDecisionKey(r)]; ok {
 			plan.Decisions = append(plan.Decisions, d)
 			if pendingDecision(d) {
@@ -265,17 +277,22 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 		routes = append(routes, selected{d.Requirement, d.Status, d.Provider, d.Path, d.Discovery})
 	}
 	identity := struct {
-		Project  Project
-		Routes   []selected
-		Scope    string
-		Revision int
-		Sources  map[string]string
-		Platform string
-		Services []catalog.Service
-		NPM      string
-	}{e.Project, routes, e.scopeKey, profile.Revision, sources, plan.Platform, services, ""}
+		Project         Project
+		Routes          []selected
+		Scope           string
+		Revision        int
+		Sources         map[string]string
+		Platform        string
+		Services        []catalog.Service
+		NPM             string
+		Composer        string
+		ComposerRuntime any
+	}{e.Project, routes, e.scopeKey, profile.Revision, sources, plan.Platform, services, "", "", composerRuntime}
 	if npmPlan != nil {
 		identity.NPM = npmPlan.ID
+	}
+	if composerPlan != nil {
+		identity.Composer = composerPlan.ID
 	}
 	b, _ := json.Marshal(identity)
 	plan.ID = digest(b)
@@ -322,7 +339,7 @@ func refreshRemaining(plan Plan) Plan {
 }
 
 func pendingDecision(d Decision) bool {
-	return d.Status == "unresolved" || d.Status == "install" || d.Status == "npm_install" || d.Status == "npm_skipped"
+	return d.Status == "unresolved" || d.Status == "install" || d.Status == "npm_install" || d.Status == "npm_skipped" || d.Status == "composer_install"
 }
 
 const maxProjectSourceBytes = 16 << 20
@@ -393,6 +410,21 @@ func (e *Engine) Install(ctx context.Context, requirements []Requirement, approv
 	}
 	if approval != "" && approval != plan.ID {
 		return plan, fmt.Errorf("plan changed since approval; review a fresh plan")
+	}
+	if plan.Composer != nil {
+		report, err := e.installComposer(ctx, plan.Composer)
+		plan.ComposerReport = &report
+		if err != nil {
+			return refreshRemaining(plan), fmt.Errorf("replay Composer lock: %w", err)
+		}
+		for i, d := range plan.Decisions {
+			if d.Status == "composer_install" {
+				plan.Decisions[i].Status = "composer_installed"
+				plan.Decisions[i].Reason = "verified full frozen Composer tree and generated autoloader; PHP requirements checked; scripts and plugins skipped"
+				plan.Decisions[i].Evidence = "composer-plan:" + plan.Composer.ID
+				plan.Decisions[i].Cached = report.Downloaded == 0
+			}
+		}
 	}
 	if plan.NPM != nil {
 		report, err := e.installNPM(ctx, plan.NPM)

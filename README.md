@@ -20,7 +20,13 @@ The current source also includes [frozen npm v3 replay](docs/NPM.md). Selecting
 a direct `npm:` requirement verifies and installs its whole locked dependency
 tree with SHA-512 integrity. Lifecycle scripts and version solving are unsupported.
 The [Zefram acceptance record](docs/VALIDATION.md) reports the real fixture's
-18 passing JavaScript tests, three passing frontend builds, and offline replay.
+47 passing PHP tests, 18 passing JavaScript tests, three frontend builds, and
+offline replay of both dependency trees.
+
+[Frozen Composer replay](docs/COMPOSER.md) now prepares the locked PHP `vendor`
+tree, autoloader, runtime metadata, and PHP executable proxies directly in Go.
+PHP and extensions are checked before installation. Locks without archive
+checksums require an explicit source-reference policy in `archer.json`.
 
 Archer is a clean-sheet, dependency-free Go CLI. The executable needs no PHP,
 Node, Composer, npm, Docker, Kubernetes or system package manager to start.
@@ -42,7 +48,7 @@ remote API. **There are no model calls in this version.**
 
 ## Use the local build
 
-Build current source for the protocol and npm commands:
+Build current source for the protocol and package commands:
 
 ```sh
 go build -trimpath -buildvcs=false -o dist/archer ./cmd/archer
@@ -70,8 +76,9 @@ verified bytes are published.
 
 `archer init` reads Composer/npm manifests and preserves package names and version
 constraints in `archer.json`. It refuses to overwrite an existing configuration.
-Supported npm v3 locks can now be replayed directly. Composer installation,
-dependency solving, autoload generation and lifecycle hooks remain subsequent work.
+Supported npm v3 and stable GitHub Composer locks can now be replayed directly.
+Managed runtimes, general dependency solving, and lifecycle execution remain
+subsequent work. See the backend documents for their supported profiles.
 
 ## Direct bootstrap distribution
 

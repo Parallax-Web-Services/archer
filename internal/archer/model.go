@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Parallax-Web-Services/archer/internal/catalog"
+	"github.com/Parallax-Web-Services/archer/internal/composer"
 	"github.com/Parallax-Web-Services/archer/internal/npm"
 	"github.com/Parallax-Web-Services/archer/internal/store"
 	"regexp"
@@ -48,6 +49,12 @@ type Project struct {
 	Local        []LocalCapability `json:"local,omitempty"`
 	Registries   []string          `json:"registries,omitempty"`
 	Recipes      []Recipe          `json:"recipes,omitempty"`
+	Composer     *ComposerConfig   `json:"composer,omitempty"`
+}
+
+type ComposerConfig struct {
+	PHP          string                `json:"php,omitempty"`
+	SourcePolicy composer.SourcePolicy `json:"source_policy"`
 }
 type Decision struct {
 	Requirement Requirement `json:"requirement"`
@@ -61,16 +68,19 @@ type Decision struct {
 	Discovery   string      `json:"discovery"`
 }
 type Plan struct {
-	Schema     string             `json:"schema"`
-	ID         string             `json:"id"`
-	Scope      string             `json:"scope"`
-	Platform   string             `json:"platform"`
-	Decisions  []Decision         `json:"decisions"`
-	Catalogs   []catalog.Snapshot `json:"catalogs,omitempty"`
-	Remaining  []Requirement      `json:"remaining"`
-	AIRequests int                `json:"ai_requests"`
-	NPM        *npm.Plan          `json:"npm,omitempty"`
-	NPMReport  *npm.Report        `json:"npm_report,omitempty"`
+	Schema          string                `json:"schema"`
+	ID              string                `json:"id"`
+	Scope           string                `json:"scope"`
+	Platform        string                `json:"platform"`
+	Decisions       []Decision            `json:"decisions"`
+	Catalogs        []catalog.Snapshot    `json:"catalogs,omitempty"`
+	Remaining       []Requirement         `json:"remaining"`
+	AIRequests      int                   `json:"ai_requests"`
+	NPM             *npm.Plan             `json:"npm,omitempty"`
+	NPMReport       *npm.Report           `json:"npm_report,omitempty"`
+	Composer        *composer.Plan        `json:"composer,omitempty"`
+	ComposerReport  *composer.Report      `json:"composer_report,omitempty"`
+	ComposerRuntime *composer.RuntimeInfo `json:"composer_runtime,omitempty"`
 }
 type Context struct {
 	Schema   string            `json:"schema"`

@@ -138,7 +138,7 @@ func (e *Engine) record(plan Plan) error {
 	}
 	changed := false
 	for _, d := range plan.Decisions {
-		if d.Status != "service" && d.Status != "local" && d.Status != "installed" && d.Status != "npm_installed" {
+		if d.Status != "service" && d.Status != "local" && d.Status != "installed" && d.Status != "npm_installed" && d.Status != "composer_installed" && d.Status != "composer_platform" {
 			continue
 		}
 		c.Bindings[d.Requirement.Capability] = d.Provider

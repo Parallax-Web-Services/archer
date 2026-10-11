@@ -190,8 +190,8 @@ func TestStaleDiscoveryCannotJustifyInstallationOrAI(t *testing.T) {
 }
 func TestRemoteServiceCannotSubstituteForPackage(t *testing.T) {
 	p := project()
-	p.Requirements = []Requirement{{Capability: "composer:example/library", Delivery: "package"}}
-	p.Services = []catalog.Service{{ID: "remote-library", Provides: []string{"composer:example/library"}}}
+	p.Requirements = []Requirement{{Capability: "example/library", Delivery: "package"}}
+	p.Services = []catalog.Service{{ID: "remote-library", Provides: []string{"example/library"}}}
 	result, err := engine(t, p).Plan(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)

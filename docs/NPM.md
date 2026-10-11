@@ -10,7 +10,7 @@ dist/archer i npm:react --project /path/to/project --json
 dist/archer i npm:react --project /path/to/project --offline --json
 ```
 
-Replace `npm:react` with a direct declaration in that project's `package.json`. Selecting any supported npm requirement replays the **whole locked tree**, including development dependencies, nested placements, and supported optional packages. It does not install just that selector. Selecting npm requirements leaves Composer requirements outside the invocation; a full `archer i` still reports unsupported Composer work.
+Replace `npm:react` with a direct declaration in that project's `package.json`. Selecting any supported npm requirement replays the **whole locked tree**, including development dependencies, nested placements, and supported optional packages. It does not install just that selector. Selecting npm requirements leaves Composer requirements outside the invocation; a full `archer i` evaluates both supported backends under the project's source and runtime policy.
 
 ## What the backend proves
 

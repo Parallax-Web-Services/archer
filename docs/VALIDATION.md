@@ -1,6 +1,8 @@
-# Zefram npm acceptance record
+# Zefram package acceptance record
 
 On 11 October 2026, Archer's local project CLI installed a frozen Zefram frontend dependency tree, passed the application's JavaScript tests and production builds, and repeated installation offline without changing dependency files. The live Zefram checkout was read only; source, caches, dependencies, and build output lived in disposable directories under Archer's ignored QA workspace.
+
+The subsequent combined run used one `archer i` to prepare both PHP and npm dependencies. It passed all 47 PHP tests with 333 assertions, all 18 JavaScript tests, and three frontend builds. The Composer source policy and existing runtimes are explicit prerequisites, described below.
 
 ## Inputs and environment
 
@@ -62,4 +64,42 @@ The three Vite builds transformed 578, 578, and 78 modules respectively. A furth
 
 All seven Go packages passed native Windows and Linux tests. Coverage includes required/peer graph closure, platform filtering, source and plan drift, archive integrity, identical canonical duplicates, conflicting entries, traversal and link rejection, archive/tree limits, lifecycle hooks, native build requirements, unmanaged and changed trees, offline replay, executable links, and context concurrency. The PHP bridge and native Parallax worker also passed their integration checks.
 
-This demonstrates npm lock replay and Zefram frontend compatibility for the specified inputs. It does not complete the full installer acceptance gate: Composer packages and PHP autoloading, managed PHP/Node runtimes, service contract readiness, and application-wide PHP tests remain pending. Locked PHP distributions also need an explicit provenance policy because this fixture's Composer lock does not supply distribution checksums.
+This initial run demonstrated npm replay. The combined PHP/npm run below extends the same frozen fixture; its remaining boundary is managed runtimes and authorized application/service orchestration.
+
+## Combined PHP/npm acceptance
+
+A second fresh checkout of the same archived commit and an empty shared Archer home were used. The four source hashes above were checked again and remained identical. PHP was the existing `/usr/bin/php` 8.5.8 with the required extensions; Node was the existing 24.20.0 runtime. The Composer lock includes 77 production packages and 38 development packages, all materialized by this profile. The complete graph requires PHP at least 8.4.1 despite the root's `^8.3` declaration; the runtime check uses the full graph.
+
+This fixture's Composer lock supplies no distribution SHA-1 checksums. Its `archer.json` explicitly selected `source-reference` with `api.github.com` and `codeload.github.com` as trusted hosts, as documented in [COMPOSER.md](COMPOSER.md). Downloads retain the locked repository and 40-digit commit reference. First-download SHA-256 receipts record local provenance; they are not publisher checksums or signatures. That trust boundary differs from the lock-provided npm SHA-512 expectations.
+
+```sh
+archer init --project FIXTURE --home CACHE
+# Set the documented composer.php and composer.source_policy fields in archer.json.
+archer plan --json --project FIXTURE --home CACHE
+archer i --json --approval PLAN_ID --project FIXTURE --home CACHE
+archer i --json --offline --project FIXTURE --home CACHE
+```
+
+The reviewed plan returned exit 2 for proposed work. It created neither dependency tree nor cache. The full installation returned 0 with no remaining requirements, generated PHP autoloading and installed-package metadata, and prepared PHP executable proxies. No Composer or npm command was executed.
+
+| Run | PHP packages | npm placements | Archive downloads | Cache reuses | Elapsed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Fresh project, empty combined cache | 115 | 112 | 115 PHP + 107 npm | 5 npm | 19.200 s |
+| Both trees, offline | 115 | 112 | 0 | 115 PHP + 112 npm | 4.210 s |
+
+These are single CLI observations, including planning, PHP readiness probes, source checks, publication or verification, and outcome recording. They are not comparative Composer/npm benchmarks.
+
+The same JavaScript test and build commands above passed in the combined fixture. PHP application preparation and tests were separately executed:
+
+```sh
+php artisan package:discover --no-ansi
+php vendor/bin/phpunit --no-progress --colors=never
+```
+
+Package discovery completed for the locked Laravel providers. PHPUnit 12.5.38 reported `OK (47 tests, 333 assertions)`. The test environment used an ephemeral application key and in-memory SQLite; Node was on PATH for the PHP tests that verify generated JavaScript. No live application database or environment file was copied or changed.
+
+A final full offline `archer i` after the tests and builds returned 0 with zero archive downloads. Independent snapshots confirmed that vendor and node_modules file bytes, modes, and executable-link targets remained unchanged. No model was called.
+
+All eight Go packages passed native Windows and Linux tests. Additional checks cover exact Composer content-hash, locked graph providers/replacements/conflicts, PHP and extension constraints, four-segment version boundaries, source policy/repository/reference binding, receipt and archive reuse, unsafe ZIP rejection, bounded reads, PSR loading/classmaps/file ordering, generated metadata and PHP proxies, source drift, modified/unmanaged trees, and core runtime barriers.
+
+This establishes locked package installation and application compatibility for this fixture. It does not complete the fresh-host installer gate: PHP/Node runtime provisioning, declared build/readiness execution through Archer, and functional Parallax service readiness remain pending. The installer itself skips package scripts and plugins; the application checks above were explicitly executed after installation.
