@@ -16,12 +16,13 @@ import (
 	"github.com/Parallax-Web-Services/archer/internal/worker"
 )
 
-var version = "0.2.0-dev"
+var version = "0.3.0-dev"
 
 type options struct {
 	command, project, home, approval      string
 	json, offline, plan, stdin, preflight bool
 	requirements                          []archer.Requirement
+	argv                                  []string
 }
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -42,6 +43,15 @@ func parse(args []string) (options, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
+		case "--":
+			if o.command != "run" {
+				return o, fmt.Errorf("-- is supported only for run")
+			}
+			if i+1 == len(args) {
+				return o, fmt.Errorf("run requires a command after --")
+			}
+			o.argv = append([]string{}, args[i+1:]...)
+			return o, nil
 		case "--json":
 			o.json = true
 		case "--offline":
@@ -91,6 +101,9 @@ func runWithInput(args []string, in io.Reader, out, errout io.Writer) int {
 	if err != nil {
 		return commandError(out, errout, err, o.stdin || o.command == "resolve" || o.command == "capabilities")
 	}
+	if o.command == "run" && (len(o.argv) == 0 || len(o.requirements) != 0 || o.stdin || o.preflight || o.plan || o.json || o.approval != "") {
+		return commandError(out, errout, fmt.Errorf("run accepts --project, --home, --offline and requires an explicit command after --"), false)
+	}
 	machine := o.stdin || o.command == "resolve" || o.command == "capabilities"
 	if o.stdin && o.command != "resolve" && o.command != "i" && o.command != "install" {
 		return commandError(out, errout, fmt.Errorf("--stdin is supported by resolve and install only"), machine)
@@ -113,6 +126,7 @@ Usage:
   archer i [capability ...]            replay locked PHP/npm packages or install pinned artifacts
   archer i --plan                      inspect without downloading or installing artifacts
   archer context                       show remembered project-scoped outcomes
+  archer run [options] -- COMMAND ...   run argv with freshly verified project runtimes
   archer capabilities --json           advertise configured capability descriptors
   archer resolve --json --stdin        return a Parallax resolution for requirements/context
   archer install --json --stdin        execute an approved Parallax handoff
@@ -129,7 +143,7 @@ No command invokes a model. Unknown work is returned explicitly.
 			return 1
 		}
 		return 0
-	case "plan", "doctor", "i", "install", "context", "resolve", "capabilities":
+	case "plan", "doctor", "i", "install", "context", "resolve", "capabilities", "run":
 	default:
 		fmt.Fprintln(errout, "unknown command:", o.command)
 		return 1
@@ -137,6 +151,13 @@ No command invokes a model. Unknown work is returned explicitly.
 	engine, err := archer.Load(o.project, o.home, o.offline)
 	if err != nil {
 		return commandError(out, errout, err, machine)
+	}
+	if o.command == "run" {
+		code, err := engine.Run(context.Background(), o.argv, in, out, errout)
+		if err != nil {
+			fmt.Fprintln(errout, err)
+		}
+		return code
 	}
 	if o.command == "capabilities" {
 		if len(o.requirements) > 0 {
@@ -276,6 +297,12 @@ func renderPlan(out io.Writer, asJSON bool, plan archer.Plan) int {
 		return encode(out, plan)
 	} else {
 		fmt.Fprintf(out, "Archer · %s · %s\n", plan.Scope, plan.Platform)
+		for _, runtime := range plan.Runtimes {
+			fmt.Fprintf(out, "%-10s %-24s %s\n", runtime.Status, "runtime:"+runtime.Kind, runtime.Reason)
+			if runtime.Path != "" {
+				fmt.Fprintln(out, "           "+runtime.Path)
+			}
+		}
 		for _, d := range plan.Decisions {
 			fmt.Fprintf(out, "%-10s %-24s %s\n", d.Status, d.Requirement.Capability, d.Reason)
 			if d.Path != "" {

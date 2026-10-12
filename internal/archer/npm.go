@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Parallax-Web-Services/archer/internal/npm"
+	"github.com/Parallax-Web-Services/archer/internal/runtimes"
 )
 
 // Keep distinct constraints/delivery modes distinct even for one package name.
@@ -17,7 +18,11 @@ func npmDecisionKey(requirement Requirement) string {
 // npmPlan selects only explicit root package requirements. Selecting one library
 // replays its entire producer-frozen npm tree; it never substitutes a service,
 // solves ranges independently, or executes package code to prove compatibility.
-func (e *Engine) npmPlan(requirements []Requirement) (*npm.Plan, map[string]Decision, error) {
+func (e *Engine) npmPlan(requirements []Requirement, runtimeSelection ...*runtimes.Plan) (*npm.Plan, map[string]Decision, error) {
+	var node *runtimes.Plan
+	if len(runtimeSelection) != 0 {
+		node = runtimeSelection[0]
+	}
 	decisions := map[string]Decision{}
 	for _, requirement := range requirements {
 		if !strings.HasPrefix(requirement.Capability, "npm:") {
@@ -35,6 +40,11 @@ func (e *Engine) npmPlan(requirements []Requirement) (*npm.Plan, map[string]Deci
 	plan, err := npm.Load(e.ProjectDir, target)
 	if err != nil {
 		return nil, decisions, fmt.Errorf("load frozen npm tree: %w", err)
+	}
+	if node != nil {
+		if err := runtimes.CheckNode(node.Version, plan.NodeConstraints); err != nil {
+			return nil, decisions, fmt.Errorf("Node runtime readiness: %w", err)
+		}
 	}
 	selected := map[string]npm.Package{}
 	skipped := map[string]npm.Package{}
@@ -54,6 +64,11 @@ func (e *Engine) npmPlan(requirements []Requirement) (*npm.Plan, map[string]Deci
 		name := strings.TrimPrefix(requirement.Capability, "npm:")
 		constraint, declared := plan.Direct[name]
 		if !declared {
+			continue
+		}
+		if node != nil && node.Status == "unresolved" {
+			decision.Reason = "Node runtime readiness blocked: " + node.Reason
+			decisions[key] = decision
 			continue
 		}
 		if requirement.Delivery == "service" {
@@ -82,6 +97,9 @@ func (e *Engine) npmPlan(requirements []Requirement) (*npm.Plan, map[string]Deci
 		decision.Status = "npm_install"
 		decision.Path = filepath.Join(e.ProjectDir, filepath.FromSlash(path))
 		decision.Reason = fmt.Sprintf("replay the full frozen npm tree (%d packages) for %s@%s; ranges are not independently solved and runtime compatibility is untested", len(plan.Packages), name, pkg.Version)
+		if node != nil {
+			decision.Reason = fmt.Sprintf("replay the full frozen npm tree (%d packages) for %s@%s with pinned Node %s; scripts are not executed", len(plan.Packages), name, pkg.Version, node.Version)
+		}
 		decisions[key] = decision
 	}
 	if !active {
@@ -99,6 +117,9 @@ func (e *Engine) npmPlan(requirements []Requirement) (*npm.Plan, map[string]Deci
 				}
 				decision.Status = "npm_installed"
 				decision.Reason = fmt.Sprintf("reuse the freshly verified full frozen npm tree (%d packages); runtime compatibility is untested", len(plan.Packages))
+				if node != nil {
+					decision.Reason = fmt.Sprintf("reuse the freshly verified full frozen npm tree (%d packages); locked engines match pinned Node %s", len(plan.Packages), node.Version)
+				}
 				decision.Evidence = "npm-plan:" + plan.ID
 				decision.Cached = true
 				decisions[key] = decision
@@ -108,7 +129,15 @@ func (e *Engine) npmPlan(requirements []Requirement) (*npm.Plan, map[string]Deci
 	return plan, decisions, nil
 }
 
-func (e *Engine) installNPM(ctx context.Context, plan *npm.Plan) (npm.Report, error) {
+func (e *Engine) installNPM(ctx context.Context, plan *npm.Plan, selected ...*runtimes.Plan) (npm.Report, error) {
+	if len(selected) != 0 && selected[0] != nil {
+		if !runtimeReady(selected[0]) {
+			return npm.Report{}, fmt.Errorf("Node runtime is not prepared")
+		}
+		if err := runtimes.CheckNode(selected[0].Version, plan.NodeConstraints); err != nil {
+			return npm.Report{}, err
+		}
+	}
 	if err := plan.Validate(); err != nil {
 		return npm.Report{}, err
 	}

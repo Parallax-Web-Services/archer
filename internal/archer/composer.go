@@ -8,13 +8,18 @@ import (
 	"strings"
 
 	"github.com/Parallax-Web-Services/archer/internal/composer"
+	"github.com/Parallax-Web-Services/archer/internal/runtimes"
 )
 
 func composerDecisionKey(r Requirement) string {
 	return r.Capability + "\x00" + r.Delivery + "\x00" + r.Constraint
 }
 
-func (e *Engine) composerPlan(ctx context.Context, requirements []Requirement) (*composer.Plan, *composer.RuntimeInfo, map[string]Decision, error) {
+func (e *Engine) composerPlan(ctx context.Context, requirements []Requirement, selected ...*runtimes.Plan) (*composer.Plan, *composer.RuntimeInfo, map[string]Decision, error) {
+	var php *runtimes.Plan
+	if len(selected) != 0 {
+		php = selected[0]
+	}
 	decisions := map[string]Decision{}
 	for _, r := range requirements {
 		if strings.HasPrefix(r.Capability, "composer:") {
@@ -41,8 +46,14 @@ func (e *Engine) composerPlan(ctx context.Context, requirements []Requirement) (
 	}
 	var runtime *composer.RuntimeInfo
 	runtimeError := "runtime verification is unavailable on the planning host"
-	if !e.SkipLocalVerification {
-		info, err := composer.ProbeRuntime(ctx, config.PHP)
+	pendingRuntime := php != nil && php.Status == "install" && !e.SkipLocalVerification
+	if php != nil {
+		if err := checkPHPVersion(plan, php.Version); err != nil {
+			return nil, nil, decisions, err
+		}
+	}
+	if !e.SkipLocalVerification && !pendingRuntime {
+		info, err := e.phpRuntimeEvidence(ctx, config.PHP, php)
 		if err == nil {
 			err = composer.CheckRuntime(plan, info)
 			runtime = &info
@@ -73,13 +84,18 @@ func (e *Engine) composerPlan(ctx context.Context, requirements []Requirement) (
 			d.Reason = "Composer replay supplies a local library or PHP capability and cannot fulfill service delivery"
 		} else if r.Constraint != "" && r.Constraint != constraint {
 			d.Reason = fmt.Sprintf("requested Composer constraint %q differs from frozen declaration %q", r.Constraint, constraint)
-		} else if runtimeError != "" {
+		} else if runtimeError != "" && !pendingRuntime {
 			d.Reason = "Composer runtime readiness blocked: " + runtimeError
 		} else if name == "php" || strings.HasPrefix(name, "ext-") {
-			d.Status = "composer_platform"
 			d.Provider = "php-runtime"
-			d.Reason = "PHP and extension requirements freshly verified against the complete frozen graph"
-			d.Evidence = "php:" + runtime.PHPVersion
+			if pendingRuntime {
+				d.Status = "composer_platform_pending"
+				d.Reason = "prepare the pinned PHP interpreter, then verify all locked PHP and extension requirements"
+			} else {
+				d.Status = "composer_platform"
+				d.Reason = "PHP and extension requirements freshly verified against the complete frozen graph"
+				d.Evidence = "php:" + runtime.PHPVersion
+			}
 		} else if p, exists := packages[name]; exists {
 			active = true
 			d.Status = "composer_install"
@@ -91,7 +107,10 @@ func (e *Engine) composerPlan(ctx context.Context, requirements []Requirement) (
 		}
 		decisions[key] = d
 	}
-	if !active {
+	if !active || pendingRuntime {
+		if active {
+			return plan, runtime, decisions, nil
+		}
 		return nil, runtime, decisions, nil
 	}
 	verified, err := composer.Verify(e.ProjectDir, plan)
@@ -112,12 +131,16 @@ func (e *Engine) composerPlan(ctx context.Context, requirements []Requirement) (
 	return plan, runtime, decisions, nil
 }
 
-func (e *Engine) installComposer(ctx context.Context, plan *composer.Plan) (composer.Report, error) {
+func (e *Engine) installComposer(ctx context.Context, plan *composer.Plan, selected ...*runtimes.Plan) (composer.Report, error) {
 	config := ComposerConfig{}
 	if e.Project.Composer != nil {
 		config = *e.Project.Composer
 	}
-	info, err := composer.ProbeRuntime(ctx, config.PHP)
+	var php *runtimes.Plan
+	if len(selected) != 0 {
+		php = selected[0]
+	}
+	info, err := e.phpRuntimeEvidence(ctx, config.PHP, php)
 	if err == nil {
 		err = composer.CheckRuntime(plan, info)
 	}

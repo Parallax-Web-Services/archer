@@ -1,14 +1,15 @@
 # Frozen Composer replay
 
-Archer installs the complete package tree recorded in `composer.lock` using Go ZIP extraction and a generated PHP autoloader. Selecting a directly declared `composer:` requirement replays the whole lock, including development dependencies. The backend checks the installed PHP interpreter and required extensions before installation; it does not provision that interpreter yet.
+Archer installs the complete package tree recorded in `composer.lock` using Go ZIP extraction and a generated PHP autoloader. Selecting a directly declared `composer:` requirement replays the whole lock, including development dependencies. The backend checks the selected PHP interpreter and required extensions before installation. Declare an exact `runtimes.php` pin to reuse local PHP or prepare a verified PHP bundle through the [runtime backend](RUNTIMES.md). Without that declaration, `composer.php` retains its existing local-interpreter behavior.
 
 ```sh
 archer plan composer:laravel/framework --project /path/to/project --json
 archer i composer:laravel/framework --project /path/to/project --json
 archer i composer:laravel/framework --project /path/to/project --offline --json
+archer run --project /path/to/project -- php artisan test
 ```
 
-The selector must name a direct requirement in the project's `composer.json`. Its requested constraint must agree with that declaration. A service-delivery requirement cannot be satisfied by copying a PHP library into `vendor`.
+The selector must name a direct requirement in the project's `composer.json`. Its requested constraint must agree with that declaration. A service-delivery requirement cannot be satisfied by copying a PHP library into `vendor`. Selecting Composer work includes the declared PHP runtime and prepares it before the package tree. Reuse requires both the exact PHP pin and complete graph readiness; a configured pinned bundle can replace a local interpreter that lacks a required extension.
 
 ## Source policy and receipts
 
@@ -17,7 +18,6 @@ The default `checksum` policy requires every package distribution to supply a va
 ```json
 {
   "composer": {
-    "php": "/usr/bin/php",
     "source_policy": {
       "mode": "source-reference",
       "trusted_hosts": ["api.github.com", "codeload.github.com"]
@@ -26,7 +26,7 @@ The default `checksum` policy requires every package distribution to supply a va
 }
 ```
 
-This is the `composer` portion of `archer.json`; retain the rest of the project's configuration. Source-reference mode requires immutable 40-digit commit references and archive URLs that identify their repository and commit. Configured hosts must be explicit. When both GitHub hosts are trusted, Archer derives the corresponding immutable codeload route from an API archive URL, preserving the repository and commit while avoiding an API request for every package. Redirects must preserve that identity and remain inside the chosen source policy.
+This is the `composer` portion of `archer.json`; retain the rest of the project's configuration. Set `composer.php` for a particular local interpreter or declare `runtimes.php` for an exact runtime pin and bundle policy. If both `composer.php` and `runtimes.php.binary` are supplied, they must select the same interpreter. Source-reference mode requires immutable 40-digit commit references and archive URLs that identify their repository and commit. Configured hosts must be explicit. When both GitHub hosts are trusted, Archer derives the corresponding immutable codeload route from an API archive URL, preserving the repository and commit while avoiding an API request for every package. Redirects must preserve that identity and remain inside the chosen source policy.
 
 Each source identity receives an archive and a receipt published together in a private cache directory. The receipt binds the original distribution URL, any declared Git source URL, effective download URL, commit reference, any lock checksum, byte count, and the SHA-256 of the first downloaded bytes. A declared Git source must identify the same repository and commit as the distribution. Subsequent uses rehash the archive and compare that receipt. Archer preserves a corrupt or incomplete cache entry and reports an error instead of silently downloading replacement bytes.
 
@@ -46,7 +46,13 @@ An unmanaged tree, modified file, changed lock, or unsupported profile produces 
 
 The current backend supports frozen stable-version GitHub ZIP distributions for library and project package types, PSR-4 and PSR-0 loading, classmaps, file autoloading, installed-package metadata, and PHP binary proxies. The runtime must satisfy the PHP and extension requirements of the complete locked graph. Package requirements retain their recorded resolution; Archer does not run a dependency solver.
 
-Custom repositories, Composer plugins, package scripts, metapackages, non-PHP executable proxies, custom vendor or binary directories, platform overrides, and partial production-only installs are outside this profile. Root classmaps that scan the whole project, vendor, or Archer's private staging directories are rejected because their output would depend on installation state. A project that needs a post-install script or readiness command must run it through a separately authorized execution step before claiming application readiness.
+Custom repositories, Composer plugins, package scripts, metapackages, non-PHP executable proxies, custom vendor or binary directories, platform overrides, and partial production-only installs are outside this profile. Root classmaps that scan the whole project, vendor, or Archer's private staging directories are rejected because their output would depend on installation state. Run explicit application checks through `archer run -- php ...`; it verifies declared runtime and frozen graph readiness, obtains no artifacts, and preserves the child exit code. It does not run package scripts or claim application readiness by itself.
+
+Managed PHP reads the bundle's declared `php_ini`, or an empty Archer-owned ini, through `PHPRC` with `PHP_INI_SCAN_DIR` empty. A selected local `php_ini` uses that environment too; local PHP without one keeps its ambient configuration. The runtime bundle must supply compatible extensions and libraries. Archer does not compile PHP extensions or install OS libraries merely because the lock requires them.
+
+For portable bundle paths, a pinned ini can use
+`extension_dir="${ARCHER_PHP_ROOT}/ext"`. Archer sets `ARCHER_PHP_ROOT` to the owned
+managed bundle root, or the local executable's directory for a selected local ini.
 
 Limits are 2 MiB for the manifest, 16 MiB for the lock and each classmap/binary inspection source, 256 MiB per archive, 512 MiB expanded bytes and 100,000 entries per archive, 4 GiB and 200,000 entries per installed tree, and 32 MiB for the tree inventory. Failed attempts clean their private stages. Abandoned cache or project lock directories require inspection.
 

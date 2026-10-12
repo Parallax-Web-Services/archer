@@ -5,8 +5,9 @@ Straight & steady. One installer for Zefram and the Parallax ecosystem.
 Install and run Archer as a standalone executable. **Go is optional**: it is
 needed only to build Archer from source or develop it. A prebuilt Archer needs
 no Go, PHP, Node, Composer, npm, Docker, Kubernetes or system package manager
-to start. Projects still need compatible runtimes for their own execution;
-Composer replay checks PHP and its extensions before preparing the PHP tree.
+to start. Project declarations can now pin PHP and Node runtimes for local reuse
+or verified bundle installation. `archer run` launches application commands with
+those selected runtimes.
 
 Read the [product and technical design](docs/DESIGN.md) for the complete product
 contract, current boundaries, Slipstream integration, caching architecture, and
@@ -34,6 +35,12 @@ tree, autoloader, runtime metadata, and PHP executable proxies in Archer.
 PHP and extensions are checked before installation. Locks without archive
 checksums require an explicit source-reference policy in `archer.json`.
 
+[Managed runtimes and project execution](docs/RUNTIMES.md) complete the next
+local preparation slice: exact PHP/Node pins, verified runtime archives,
+project-scoped trees, current lock-graph compatibility checks, and direct command
+execution. Runtime sources remain explicit project policy; OS libraries,
+automatic builds, and service readiness need further adapters.
+
 Archer is a clean-sheet CLI implemented in Go, with no third-party module
 dependencies. Its implementation language adds no toolchain requirement for users.
 
@@ -59,7 +66,7 @@ install a pinned version under a per-user `ARCHER_HOME`, verify SHA-256 before
 placement, retain old versions, and print PATH setup. They do not modify shell
 startup files, use sudo, or execute downloaded binaries.
 
-Use the [v0.2.0-alpha.2 prerelease](https://github.com/Parallax-Web-Services/archer/releases/tag/v0.2.0-alpha.2).
+Use the [v0.3.0-alpha.1 prerelease](https://github.com/Parallax-Web-Services/archer/releases/tag/v0.3.0-alpha.1).
 It supplies Linux, macOS and Windows binaries for amd64 and arm64, plus
 `SHA256SUMS`. Windows/amd64 and Linux/amd64 have native execution checks;
 macOS and arm64 artifacts are cross-built. The package backends have additional
@@ -68,16 +75,16 @@ platform limits documented in their respective guides.
 On Linux/macOS, download the pinned bootstrap script and run it:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.2.0-alpha.2/scripts/install.sh -o archer-install.sh
-ARCHER_VERSION=v0.2.0-alpha.2 sh ./archer-install.sh
+curl -fsSL https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.3.0-alpha.1/scripts/install.sh -o archer-install.sh
+ARCHER_VERSION=v0.3.0-alpha.1 sh ./archer-install.sh
 export PATH="$HOME/.archer/bin:$PATH"
 ```
 
 For Windows:
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.2.0-alpha.2/scripts/install.ps1" -OutFile archer-install.ps1
-$env:ARCHER_VERSION = "v0.2.0-alpha.2"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.3.0-alpha.1/scripts/install.ps1" -OutFile archer-install.ps1
+$env:ARCHER_VERSION = "v0.3.0-alpha.1"
 powershell -NoProfile -ExecutionPolicy Bypass -File ./archer-install.ps1
 $env:PATH = "$HOME/.archer/bin;$env:PATH"
 ```
@@ -87,7 +94,7 @@ release. To use a prepared local release directory instead, set `ARCHER_DIST_DIR
 when running the same script:
 
 ```sh
-ARCHER_DIST_DIR="/path/to/release" ARCHER_VERSION=v0.2.0-alpha.2 sh ./archer-install.sh
+ARCHER_DIST_DIR="/path/to/release" ARCHER_VERSION=v0.3.0-alpha.1 sh ./archer-install.sh
 ```
 
 On Windows, set `$env:ARCHER_DIST_DIR = "C:/path/to/release"` before running
@@ -102,28 +109,64 @@ System package-manager listings are a later distribution step.
 
 After installation and PATH setup:
 
+Application commands assume a prepared project with the corresponding PHP/Node
+runtime declarations; add those pins before `archer i` as shown below.
+
 ```sh
 archer version
 archer init
 archer plan --json
 archer i --plan
 archer i
+archer run -- php artisan test
+archer run -- node ./scripts/test.mjs
 archer context
 ```
 
 Flags can follow capabilities:
 `archer plan database --project /path/to/project --json`.
 
-Exit codes: **0** all requirements satisfied, **2** remaining work,
+Project preparation exit codes: **0** all requirements satisfied, **2** remaining work,
 **1** configuration, integrity or execution failure. Plans are machine-readable
 `archer.plan/v1` documents. A planned installation remains unsatisfied until its
-verified bytes are published.
+verified bytes are published. `archer run` preserves the child command's exit code.
 
 `archer init` reads Composer/npm manifests and preserves package names and version
 constraints in `archer.json`. It refuses to overwrite an existing configuration.
 Supported npm v3 and stable GitHub Composer locks can now be replayed directly.
-Managed runtimes, general dependency solving, and lifecycle execution remain
-subsequent work. See the backend documents for their supported profiles.
+Add exact runtime pins and bundles to `archer.json` when the project needs managed
+PHP or Node; `init` does not choose runtime versions or sources. `archer i`
+prepares those runtimes before packages. General dependency solving and lifecycle
+execution remain subsequent work. See the backend documents for their supported profiles.
+
+For example, a project can declare the official Node 24.20.0 Linux/amd64 archive:
+
+```json
+{
+  "runtimes": {
+    "node": {
+      "version": "24.20.0",
+      "artifacts": [{
+        "platform": "linux/amd64",
+        "format": "tar.gz",
+        "artifact": {
+          "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.gz",
+          "sha256": "855d581f8a4eb1a8117e3426de25fe02770592febcfb31369aee1ffbfee9e8ec"
+        },
+        "strip_prefix": "node-v24.20.0-linux-x64",
+        "executable": "bin/node"
+      }]
+    }
+  }
+}
+```
+
+This is the `runtimes` portion of an existing project configuration. An exact
+compatible local Node is reused; otherwise Archer installs the pinned bundle.
+The [runtime guide](docs/RUNTIMES.md) has a complete configuration and the PHP,
+archive, offline, and `run` contracts. Commands after `run --` receive direct
+argv, the project working directory, standard streams, and selected runtime PATH.
+`run` verifies readiness and obtains no new artifacts; prepare with `archer i` first.
 
 ## Project context and services
 
@@ -221,10 +264,12 @@ python scripts/test-installers.py
 `scripts/release.ps1` cross-builds Linux, macOS and Windows for amd64 and arm64,
 then writes `SHA256SUMS`. Cross-compilation is not native-platform execution QA.
 
-Current limits: general Composer/npm dependency solving, managed runtime
-provisioning, Docker/Kubernetes/apt adapters, SaaS business-action execution,
-automatic Slipstream worker callbacks, and AI fallback are future slices.
-Archer currently replays its supported locks, prepares pinned raw artifacts,
-verifies available capabilities, and reports remaining work.
+Current limits: general Composer/npm dependency solving, lifecycle hooks,
+automatic build/readiness orchestration, runtime catalog selection or source
+compilation, OS libraries and PHP extension provisioning, Docker/Kubernetes/apt
+adapters, SaaS business-action execution, automatic Slipstream worker callbacks,
+and AI fallback are future slices. Archer currently replays its supported locks,
+prepares explicit pinned runtime bundles and raw artifacts, runs requested project
+commands, verifies available capabilities, and reports remaining work.
 
 MIT licensed.

@@ -19,6 +19,13 @@ const runtimeProbePHP = `$versions = []; foreach (get_loaded_extensions() as $ex
 // ProbeRuntime executes only a fixed introspection program in an explicitly
 // selected PHP interpreter. It does not load project or package code.
 func ProbeRuntime(ctx context.Context, binary string) (RuntimeInfo, error) {
+	return ProbeRuntimeWithEnv(ctx, binary, nil)
+}
+
+// ProbeRuntimeWithEnv uses the selected interpreter's environment for the same
+// configuration that Archer passes to an application command. A nil environment
+// preserves the invoking process's configuration for legacy local interpreters.
+func ProbeRuntimeWithEnv(ctx context.Context, binary string, environment []string) (RuntimeInfo, error) {
 	if binary == "" {
 		binary = "php"
 	}
@@ -40,6 +47,9 @@ func ProbeRuntime(ctx context.Context, binary string) (RuntimeInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, resolved, "-d", "display_errors=stderr", "-d", "log_errors=0", "-r", runtimeProbePHP)
+	if environment != nil {
+		command.Env = environment
+	}
 	var output, diagnostics probeBuffer
 	command.Stdout, command.Stderr = &output, &diagnostics
 	if err := command.Run(); err != nil {

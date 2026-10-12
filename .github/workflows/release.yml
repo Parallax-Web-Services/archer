@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Pinned release tag, for example v0.2.0-alpha.2'
+        description: 'Pinned release tag, for example v0.3.0-alpha.1'
         required: true
         type: string
       publish:
@@ -195,7 +195,7 @@ jobs:
             commit="$(jq -r '.object.sha' "$RUNNER_TEMP/archer-tag.json")"
           done
           [[ "$kind" == commit && "$commit" == "$SOURCE_COMMIT" ]] || { echo 'Release tag no longer points to the tested source.' >&2; exit 1; }
-          printf 'Prebuilt Archer binaries for Linux, macOS, and Windows (amd64/arm64). Go is only needed when building Archer from source.\n\nSource commit: `%s`. Check `SHA256SUMS` before installation. `BUILDINFO.json` records the toolchain and build targets.\n' "$SOURCE_COMMIT" > "$RUNNER_TEMP/archer-release-notes.md"
+          printf 'Prebuilt Archer binaries for Linux, macOS, and Windows (amd64/arm64). Go is only needed when building Archer from source.\n\nProject declarations can pin PHP and Node versions for verified local reuse or SHA-256-pinned bundle preparation. `archer i` prepares runtimes before frozen Composer/npm trees; `archer run -- COMMAND` executes with selected runtimes, project working directory, standard streams, and child exit codes. Runtime sources remain explicit project policy and must match host OS libraries.\n\nSource commit: `%s`. Check `SHA256SUMS` before installation. `BUILDINFO.json` records the toolchain and build targets. Read the runtime guide and Zefram acceptance record in the tagged repository.\n' "$SOURCE_COMMIT" > "$RUNNER_TEMP/archer-release-notes.md"
           args=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Archer $TAG" --notes-file "$RUNNER_TEMP/archer-release-notes.md")
           [[ "$PUBLISH" == true ]] || args+=(--draft)
           [[ "$TAG" != *-* ]] || args+=(--prerelease)

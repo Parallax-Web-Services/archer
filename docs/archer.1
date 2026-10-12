@@ -1,5 +1,5 @@
 .\" Source: docs/MANPAGE.md. Keep both forms in sync.
-.TH ARCHER 1 "2026-10-12" "Archer 0.2.0-alpha.2" "User Commands"
+.TH ARCHER 1 "2026-10-12" "Archer 0.3.0-alpha.1" "User Commands"
 .SH "NAME"
 .PP
 archer \- resolve project requirements, reuse services, and install verified artifacts
@@ -11,6 +11,7 @@ archer init [\-\-project DIR]
 archer plan [CAPABILITY ...] [OPTIONS]
 archer install [CAPABILITY ...] [OPTIONS]
 archer i [CAPABILITY ...] [OPTIONS]
+archer run [\-\-project DIR] [\-\-home DIR] [\-\-offline] \-\- COMMAND [ARG ...]
 archer doctor [CAPABILITY ...] [OPTIONS]
 archer capabilities [\-\-project DIR] [\-\-json]
 archer resolve [CAPABILITY ...] [OPTIONS]
@@ -29,9 +30,9 @@ Archer prepares project capabilities by checking existing services and local sof
 .PP
 For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash\-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Missing, stale, or unavailable configured discovery blocks unrestricted fallback. Use \fBdelivery: local\fR for an explicitly local\-only artifact requirement.
 .PP
-This version installs individual raw executable artifacts and replays supported npm v3 and Composer locks. Non\-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
+This version installs raw executable artifacts and explicitly pinned PHP/Node runtime bundles, replays supported npm v3 and Composer locks, and launches project commands. Runtime versions must be exact stable pins; other non\-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
 .PP
-The prebuilt Archer executable requires no Go toolchain. Go is optional and needed only when compiling or developing Archer from source. Application runtime requirements remain separate: Composer replay verifies PHP and its extensions, and application execution requires compatible PHP or Node as declared by the project.
+The prebuilt Archer executable requires no Go toolchain. Go is optional and needed only when compiling or developing Archer from source. Project runtime declarations choose local reuse or a verified bundle; Composer checks PHP and extensions, and declared Node pins are checked against npm engine requirements.
 .PP
 .SH "COMMANDS"
 .PP
@@ -49,15 +50,46 @@ Evaluate requirements and print a plan with current evidence and remaining work.
 .PP
 Compute a fresh plan, obtain the selected pinned artifacts, verify their SHA\-256 digests, and publish them into the project\-scoped Archer bin directory. Existing matching managed files are reused after verification; conflicting files are preserved and cause an error. Installed binaries are not executed by the artifact installer.
 .PP
-For a direct npm requirement, replay the whole supported v3 lock into project \fBnode_modules\fR, including development dependencies and nested placements. Verify SHA\-512 archives and stage the complete tree before publication. Existing managed trees are freshly verified; unmanaged, changed, and updated\-lock trees are refused. Package code and lifecycle scripts are not executed. Recorded Node engine requirements are reported without runtime provisioning or independent range solving. See \fBdocs/NPM.md\fR.
+For a direct npm requirement, replay the whole supported v3 lock into project \fBnode_modules\fR, including development dependencies and nested placements. Verify SHA\-512 archives and stage the complete tree before publication. Existing managed trees are freshly verified; unmanaged, changed, and updated\-lock trees are refused. Package code and lifecycle scripts are not executed. A declared Node pin is checked against the root and complete selected lock's supported engine ranges. Without a Node runtime declaration, engines are reported without a runtime compatibility claim. See \fBdocs/NPM.md\fR.
 .PP
 For a direct Composer library requirement, replay the complete supported lock into \fBvendor\fR, including development dependencies, and generate PHP autoloading, installed metadata, and PHP binary proxies. Check the selected PHP interpreter and extensions against the complete graph. A directly selected PHP/extension requirement verifies runtime readiness without installing the library tree. Composer is not invoked. Default source policy requires locked SHA\-1 distribution checksums; missing checksums need explicit \fBcomposer.source_policy\fR with \fBmode: source\-reference\fR and trusted hosts. First\-download SHA\-256 receipts record local provenance and rely on those HTTPS hosts and local receipt trust. Scripts and plugins are skipped. See \fBdocs/COMPOSER.md\fR.
+.PP
+Prepare selected declared runtimes before dependent package trees. Without selectors, include every runtime declaration. A \fBcomposer:\fR selector includes PHP, an \fBnpm:\fR selector includes Node, and \fBruntime:php\fR or \fBruntime:node\fR selects the declared runtime directly. Unrelated capability selectors do not prepare all project runtimes. Reuse requires an exact local version and applicable graph readiness; a configured PHP bundle can replace local PHP that lacks a required extension.
+.PP
+Verify runtime archive SHA\-256, extract and inventory a complete bounded tree, probe its version, and publish it under the project scope. Every managed reuse derives expected files, links, and POSIX permissions from the verified cached archive; the runtime receipt alone is insufficient. Modified or unmanaged paths are preserved and rejected. See \fBdocs/RUNTIMES.md\fR.
 .PP
 Raw artifact publication is sequential; package downloads use bounded concurrency. Earlier successful publications remain if a later backend fails. After installation completes, record verified service, local, and installed outcomes in scoped context. Unresolved requirements are reported and produce exit status 2.
 .PP
 .SS "i"
 .PP
 Alias for \fBinstall\fR.
+.PP
+.SS "run"
+.PP
+Execute the explicit command after \fB\-\-\fR in the project directory with freshly
+verified declared runtimes. Check relevant frozen Composer PHP/extension and npm
+Node engine requirements before starting the child. Obtain no artifacts,
+prepare no runtimes, and run no catalog or service requests. Prepare the project
+with \fBarcher i\fR first. This command does not verify the installed package trees;
+\fBarcher i\fR performs their integrity checks.
+.PP
+Prepend selected runtime bin directories, the scoped Archer bin directory, and
+project \fBnode_modules/.bin\fR to inherited PATH. A literal \fBphp\fR or \fBnode\fR command
+uses the selected interpreter even when its filename differs. Pass argv directly,
+without a shell, and connect standard input, output, and error. Return the child
+exit code. An explicitly named shell is required for shell expressions.
+.PP
+If the resulting PATH would resolve \fBphp\fR or \fBnode\fR to a different interpreter
+than its selected runtime, refuse execution before starting the child. Use a
+runtime bundle with its own bin directory to avoid conflicting interpreter paths.
+.PP
+Managed PHP uses its pinned ini or an empty Archer\-owned ini through \fBPHPRC\fR
+with \fBPHP_INI_SCAN_DIR\fR empty. Selected local PHP without an ini declaration keeps
+ambient configuration. Node probes clear \fBNODE_OPTIONS\fR; launched commands with
+a declared Node runtime receive it empty too.
+The child receives \fBARCHER_HOME\fR; the parent shell is unchanged. Accept only
+\fB\-\-project\fR, \fB\-\-home\fR, and \fB\-\-offline\fR before the separator. Offline mode does not
+restrict the child's network access or application effects.
 .PP
 .SS "doctor"
 .PP
@@ -81,7 +113,7 @@ Resolution status counts installable routes as covered. It does not claim instal
 .PP
 Read a \fBparallax.handoff/v1\fR request addressed to and owned by \fBarcher\fR. Require its complete \fBcontext.approved_resolution\fR object with schema \fBarcher.approval/v1\fR and native \fBrecipe_schema: archer.project/v1\fR. Validate integrity, approved scope, definitions, and routes before execution. Return an evidence\-backed \fBparallax.handoff\-result/v1\fR partition, including remaining work and the next owner.
 .PP
-PHP \fBarcher/v1\fR installer approvals describe a different executor and are rejected before probes. The current adapter handles native service health, local probes, and raw executable recipes. See \fBdocs/PROTOCOL.md\fR for the compatibility boundary.
+PHP \fBarcher/v1\fR installer approvals describe a different executor and are rejected before probes. The current adapter handles native service health, local probes, and raw executable recipes. Runtime preparation and routes dependent on configured runtimes are rejected before effects; use the local project commands. See \fBdocs/PROTOCOL.md\fR for the compatibility boundary.
 .PP
 .SS "version"
 .PP
@@ -93,7 +125,7 @@ Print command usage and exit. With no arguments, Archer prints help. Also availa
 .PP
 .SH "OPTIONS"
 .PP
-Options may appear before or after the command and capability names. Supply option values as separate arguments; \fB\-\-option=value\fR and the \fB\-\-\fR end\-of\-options marker are unsupported.
+Options may appear before or after the command and capability names. Supply option values as separate arguments; \fB\-\-option=value\fR is unsupported. The \fB\-\-\fR separator is supported only for \fBrun\fR, where all following arguments belong to the child command.
 .PP
 .SS "--project DIR"
 .PP
@@ -101,7 +133,7 @@ Read project configuration and manifests from DIR. Default: the current director
 .PP
 .SS "--home DIR"
 .PP
-Use DIR for Archer cache, managed binaries, and scoped context. Overrides \fBARCHER_HOME\fR. Default: \fBARCHER_HOME\fR if set, otherwise \fB.archer\fR in the user's home directory.
+Use DIR for Archer cache, managed binaries and runtime trees, and scoped context. Overrides \fBARCHER_HOME\fR. Default: \fBARCHER_HOME\fR if set, otherwise \fB.archer\fR in the user's home directory.
 .PP
 .SS "--json"
 .PP
@@ -122,6 +154,10 @@ Require \fBinstall \-\-stdin\fR or \fBi \-\-stdin\fR. Verify frozen native route
 .SS "--offline"
 .PP
 Skip Archer's catalog refreshes and service health requests. Services remain unverified. Configured local probes still run and are not network\-sandboxed. Artifact installation requires bytes already present in the verified content\-addressed cache; an uncached recipe pointing to a local source file also remains unresolved. Offline mode does not assume that a remote service is ready.
+.PP
+Runtime installation likewise requires cached archive bytes. Managed runtime reuse
+still verifies those archives and the installed tree and executes current probes.
+\fBrun\fR obtains no artifacts in either mode, and \fB\-\-offline\fR does not sandbox its child.
 .PP
 .SS "--approval PLAN_ID"
 .PP
@@ -149,6 +185,30 @@ Print the executable's version. Use the standalone \fBarcher \-\-version\fR form
 .PP
 \fBrecipes\fR contains raw executable installation recipes with \fBid\fR, \fBprovides\fR, \fBfilename\fR, optional \fBplatforms\fR, and \fBartifact\fR. The artifact requires \fBurl\fR and a 64\-character SHA\-256 digest in \fBsha256\fR. Platform names use OS/architecture pairs such as \fBlinux/amd64\fR. Sources may be HTTPS URLs, absolute regular local files, local file URLs, or HTTP on directly dialed loopback. Artifacts are limited to 256 MiB. Redirects must retain their origin. Cache hits are rehashed before reuse.
 .PP
+\fBruntimes\fR is an optional map keyed by \fBphp\fR and/or \fBnode\fR. Each entry requires
+an exact stable \fBversion\fR in \fBx.y.z\fR form and accepts a local \fBbinary\fR candidate,
+an \fBartifacts\fR array, and PHP\-only \fBphp_ini\fR. The candidate defaults to its runtime
+name on PATH; paths may be absolute or safe project\-relative paths. Each bundle
+declares \fBplatform\fR, \fBformat\fR (\fBraw\fR, \fBtar.gz\fR, or \fBzip\fR), \fBartifact\fR with \fBurl\fR and
+\fBsha256\fR, \fBexecutable\fR as a safe relative path, and optional exact \fBstrip_prefix\fR.
+At most one bundle is allowed per platform. Raw bundles cannot strip a prefix.
+.PP
+Managed PHP's \fBphp_ini\fR names a regular file inside its bundle. Local PHP's ini
+may be absolute or project\-relative. Managed PHP without one uses an empty owned
+ini. The bundle must supply compatible extensions and libraries; copying PHP does
+not provision OS libraries. An explicit \fBcomposer.php\fR and \fBruntimes.php.binary\fR
+must agree. \fBinit\fR does not choose runtime pins or sources.
+.PP
+Managed PHP receives \fBARCHER_PHP_ROOT\fR as the owned bundle root. Its ini can use
+\fBextension_dir="${ARCHER_PHP_ROOT}/ext"\fR instead of hard\-coding a scoped path.
+A selected local ini receives the local executable's directory as that value.
+.PP
+Runtime archives support bounded regular files, directories, and safe internal
+relative symlinks. Traversal, escaping links, hardlinks, devices, case collisions,
+and special files are rejected. Compressed artifacts are limited to 256 MiB,
+expanded runtime trees to 512 MiB, and archives to 50,000 entries. There is no
+runtime catalog, automatic version selection, or source compilation.
+.PP
 .SH "ENVIRONMENT"
 .PP
 .SS "ARCHER_HOME"
@@ -175,9 +235,17 @@ Team scope sent as \fBX\-Slipstream\-Team\fR only to the configured catalog orig
 .PP
 Local \fBservices[].token_env\fR bindings name their own environment variables. A missing configured credential prevents verification; Archer does not retry that binding through an anonymous catalog duplicate. Probes inherit the invoking process's environment, including PATH.
 .PP
+.SS "Runtime child environment"
+.PP
+For managed PHP and local PHP with a declared ini, Archer supplies \fBPHPRC\fR,
+empties \fBPHP_INI_SCAN_DIR\fR, and sets \fBARCHER_PHP_ROOT\fR as described above. A declared
+Node runtime supplies an empty \fBNODE_OPTIONS\fR. \fBrun\fR prepends project runtime and
+executable directories to PATH and sets the selected \fBARCHER_HOME\fR for its child.
+Other environment variables are inherited; Archer does not modify the parent shell.
+.PP
 .SS "Bootstrap variables"
 .PP
-The bootstrap scripts additionally use \fBARCHER_VERSION\fR for the pinned release tag, defaulting to \fBv0.2.0\-alpha.2\fR, and \fBARCHER_DIST_DIR\fR for a local release directory. These variables do not change CLI version or project recipe selection. Without a local directory, bootstrap obtains the selected binary and checksum manifest from the tagged GitHub release. Neither path requires a Go toolchain.
+The bootstrap scripts additionally use \fBARCHER_VERSION\fR for the pinned release tag, defaulting to \fBv0.3.0\-alpha.1\fR, and \fBARCHER_DIST_DIR\fR for a local release directory. These variables do not change CLI version or project recipe selection. Without a local directory, bootstrap obtains the selected binary and checksum manifest from the tagged GitHub release. Neither path requires a Go toolchain.
 .PP
 .SH "FILES"
 .PP
@@ -226,6 +294,15 @@ HOME/contexts/SCOPE_KEY.json.lock
 HOME/projects/SCOPE_KEY/bin/FILENAME
     Managed project executables.
 
+HOME/projects/SCOPE_KEY/runtimes/KIND/RUNTIME_ID
+    Project\-scoped pinned runtime tree; KIND is php or node.
+
+HOME/projects/SCOPE_KEY/runtimes/KIND/RUNTIME_ID/.archer\-runtime.json
+    Runtime receipt and inventory; reuse also derives expectations from the archive.
+
+HOME/projects/SCOPE_KEY/runtimes/KIND/RUNTIME_ID.lock
+    Runtime publication lock directory.
+
 HOME/versions/TAG/bin/archer
     POSIX bootstrap's versioned executable.
 
@@ -242,7 +319,9 @@ SCOPE_KEY is derived from the explicit project scope and canonical absolute proj
 .PP
 .SS "0"
 .PP
-Command completed successfully. For plan, doctor, and installation, all selected requirements are satisfied. An empty requirement set is satisfied.
+Command completed successfully. For plan, doctor, and installation, all selected requirements and included runtime declarations are satisfied. A project with no selected requirements or runtime declarations is satisfied.
+.PP
+For \fBrun\fR, the child exited successfully. Other child exit codes are preserved.
 .PP
 For \fBresolve\fR, status \fBsatisfied\fR or \fBpartial\fR returns 0 because installable routes count as coverage. Its \fBsatisfied\fR array still contains only verified state.
 .PP
@@ -255,6 +334,10 @@ Configuration, integrity, approval\-drift, execution, or output error. If a plan
 Evaluation completed with remaining requirements. In a plan, this includes artifacts proposed for installation. In an installation, inspect each decision to distinguish verified success from unresolved work.
 .PP
 For \fBresolve\fR, 2 means no requirement is covered. For handoff/preflight, 2 means pending or partial verified work.
+.PP
+Before starting a child, \fBrun\fR returns 2 for unavailable declared runtimes or
+unsatisfied supported runtime graph requirements, and 1 for configuration,
+integrity, or execution errors. Once a child starts, its exit code is preserved.
 .PP
 .SH "EXAMPLES"
 .PP
@@ -299,12 +382,28 @@ Reuse already cached local artifact inputs:
 archer i \-\-offline \-\-home /path/to/archer\-state
 .fi
 .PP
+Prepare a declared Node runtime and execute project code:
+.PP
+.nf
+archer i runtime:node
+archer run \-\- node \-\-version
+archer run \-\- node ./scripts/test.mjs
+.fi
+.PP
+Run application checks with declared runtimes:
+.PP
+.nf
+archer i
+archer run \-\- php artisan test
+archer run \-\- node node_modules/vite/bin/vite.js build
+.fi
+.PP
 .SH "LIMITATIONS"
 .PP
-General dependency solving, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, legacy PHP installer manifest execution, and automatic worker callbacks are not implemented. npm replay requires a supported v3 registry lock; workspaces, native builds, updated\-lock replacement, and Windows executable shims are unsupported. Composer replay requires stable GitHub ZIP distributions and a supported autoload profile; plugins, custom installers, platform overrides, broad root classmaps, and non\-PHP executable proxies are unsupported. The JSON \fBai_eligible\fR field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
+General dependency solving, lifecycle hooks, automatic build/readiness orchestration, runtime catalog selection and source compilation, OS libraries and PHP extension provisioning, Docker/Kubernetes/apt adapters, SaaS business actions, legacy PHP installer manifest execution, and automatic worker callbacks are not implemented. npm replay requires a supported v3 registry lock; workspaces, native builds, updated\-lock replacement, and Windows executable shims are unsupported. Composer replay requires stable GitHub ZIP distributions and a supported autoload profile; plugins, custom installers, platform overrides, broad root classmaps, and non\-PHP executable proxies are unsupported. The JSON \fBai_eligible\fR field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
 .PP
 Remembered context affects service ordering but never replaces a current health, probe, or hash check. Early installation failures report a partial plan, including prior verified successes, without recording those outcomes into context. Abandoned artifact and context locks require inspection; Archer reports a bounded error rather than automatically deleting them.
 .PP
 .SH "SEE ALSO"
 .PP
-Project README, \fBdocs/DESIGN.md\fR, \fBdocs/PROTOCOL.md\fR, \fBdocs/NPM.md\fR, \fBdocs/COMPOSER.md\fR, and \fBexamples/archer.json\fR in the Archer repository: https://github.com/Parallax\-Web\-Services/archer.
+Project README, \fBdocs/DESIGN.md\fR, \fBdocs/PROTOCOL.md\fR, \fBdocs/RUNTIMES.md\fR, \fBdocs/NPM.md\fR, \fBdocs/COMPOSER.md\fR, and \fBexamples/archer.json\fR in the Archer repository: https://github.com/Parallax\-Web\-Services/archer.

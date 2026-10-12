@@ -1,8 +1,8 @@
-# Zefram package acceptance record
+# Zefram preparation and execution acceptance record
 
 On 11 October 2026, Archer's local project CLI installed a frozen Zefram frontend dependency tree, passed the application's JavaScript tests and production builds, and repeated installation offline without changing dependency files. The live Zefram checkout was read only; source, caches, dependencies, and build output lived in disposable directories under Archer's ignored QA workspace.
 
-The subsequent combined run used one `archer i` to prepare both PHP and npm dependencies. It passed all 47 PHP tests with 333 assertions, all 18 JavaScript tests, and three frontend builds. The Composer source policy and existing runtimes are explicit prerequisites, described below.
+The subsequent combined run used one `archer i` to prepare both PHP and npm dependencies with existing runtimes. On 12 October 2026, a further run also prepared pinned PHP and Node bundles, then passed all 47 PHP tests with 333 assertions, all 18 JavaScript tests, and three frontend builds through `archer run`. The runtime sources and Composer source policy are explicit prerequisites, described below.
 
 ## Inputs and environment
 
@@ -102,4 +102,53 @@ A final full offline `archer i` after the tests and builds returned 0 with zero 
 
 All eight Go packages passed native Windows and Linux tests. Additional checks cover exact Composer content-hash, locked graph providers/replacements/conflicts, PHP and extension constraints, four-segment version boundaries, source policy/repository/reference binding, receipt and archive reuse, unsafe ZIP rejection, bounded reads, PSR loading/classmaps/file ordering, generated metadata and PHP proxies, source drift, modified/unmanaged trees, and core runtime barriers.
 
-This establishes locked package installation and application compatibility for this fixture. It does not complete the fresh-host installer gate: PHP/Node runtime provisioning, declared build/readiness execution through Archer, and functional Parallax service readiness remain pending. The installer itself skips package scripts and plugins; the application checks above were explicitly executed after installation.
+This established locked package installation and application compatibility for this fixture. At that stage, PHP/Node runtime provisioning, application execution through Archer, and functional Parallax service readiness remained pending. The installer skips package scripts and plugins; the application checks above were explicitly executed after installation.
+
+## Managed runtime preparation and project execution
+
+On 12 October 2026, a third fresh archive of the same Zefram commit retained all four source hashes above. Its empty Archer home and starting PATH contained no PHP, Node, Go, Composer, npm, apt, Docker, or kubectl executable. The PATH supplied only basic host utilities. Archer itself was a standalone Linux/amd64 executable, built with Go 1.27.2.
+
+The project declared exact runtime versions and SHA-256-pinned bundles:
+
+| Runtime | Bundle | SHA-256 |
+| --- | --- | --- |
+| Node 24.20.0 | Official `node-v24.20.0-linux-x64.tar.gz` | `855d581f8a4eb1a8117e3426de25fe02770592febcfb31369aee1ffbfee9e8ec` |
+| PHP 8.5.8 | Host QA bundle `php-8.5.8-hostqa-linux-amd64.tar.gz` | `608e632373fcfef08dd4b05fbdac6b917870de03dab71e613ea7871abe841063` |
+
+The Node digest was checked against the [official release checksum manifest](https://nodejs.org/dist/v24.20.0/SHASUMS256.txt). The PHP QA bundle copied the existing host binary and 37 dynamic extensions, reproduced its 56 loaded modules, and supplied a pinned configuration using `ARCHER_PHP_ROOT` for the extension directory. Its provenance record retained file hashes and host library dependencies. This PHP bundle depends on the host's existing shared libraries; it is not a published portable PHP distribution or evidence of provisioning a fresh OS. No host runtime or system package was installed or changed.
+
+The same explicit Composer source-reference policy remained necessary. After `archer init`, the project configuration added the runtime declarations described in [RUNTIMES.md](RUNTIMES.md). Planning selected both runtime bundles and the complete frozen package graphs. One reviewed installation then prepared everything:
+
+```sh
+archer plan --json --project FIXTURE --home CACHE
+archer i --json --approval PLAN_ID --project FIXTURE --home CACHE
+```
+
+| Run | Managed runtimes | PHP packages | npm placements | Package archive downloads | Elapsed |
+| --- | --- | ---: | ---: | --- | ---: |
+| Fresh project and cache | PHP 8.5.8, Node 24.20.0 | 115 | 112 | 115 PHP + 107 npm | 25.052 s |
+| Same project, offline | Both verified and reused | 115 | 112 | 0 | 11.576 s |
+
+Both runs returned exit 0 with no remaining requirements and no model calls. The cold run also obtained the two pinned runtime bundles. Five npm content reuses occurred within that run. Offline replay verified retained runtime archives, runtime inventories, and both dependency trees without downloads. These timings are single observations, include complete verification, and make no Composer/npm speed comparison.
+
+Every application command used `archer run` with the selected managed runtimes. Package discovery succeeded. The JavaScript test command above passed all 18 tests. All three Vite builds succeeded, transforming 578, 578, and 78 modules, and the preview-copy command succeeded. Frontend builds preceded the final PHP tests so the HTTP tests could read the generated Vite manifest:
+
+```sh
+archer run --project FIXTURE --home CACHE -- php artisan package:discover --no-ansi
+archer run --project FIXTURE --home CACHE -- node --test \
+  packages/zefram-js/tests/runtime.test.js \
+  resources/js/Modules/Notes/tests/browser.test.js \
+  resources/js/tests/slipstream-kit.test.js
+archer run --project FIXTURE --home CACHE -- node node_modules/vite/bin/vite.js build
+archer run --project FIXTURE --home CACHE -- node node_modules/vite/bin/vite.js build --config vite.browser.config.js
+archer run --project FIXTURE --home CACHE -- node node_modules/vite/bin/vite.js build --config vite.preview.config.js
+archer run --project FIXTURE --home CACHE -- node scripts/copy-preview.js
+archer run --project FIXTURE --home CACHE -- php vendor/bin/phpunit --no-progress --colors=never
+archer i --offline --json --project FIXTURE --home CACHE
+```
+
+PHPUnit reported `OK (47 tests, 333 assertions)` on PHP 8.5.8. Tests used an ephemeral key, in-memory SQLite, array cache/session/mail, and a synchronous queue. No live database or environment file was copied. Independent before/after snapshots confirmed that vendor and node_modules file bytes, modes, and link targets remained unchanged after all tests, builds, and offline replay; empty Vite cache directories were excluded from that snapshot.
+
+All nine Go packages passed native Windows and Linux tests; Go vet passed. The 18 Windows/POSIX bootstrap checks, nine native Linux bootstrap checks, and ten Linux PHP bridge checks also passed. Runtime checks cover exact version pins, full Composer PHP/extension requirements, all selected npm Node engine constraints, bounded archive extraction, link safety, source drift, local and managed evidence, post-probe integrity, offline reuse, and approval stability after runtime preparation. Execution checks cover literal argument forwarding, standard streams, project working directory, runtime environment, selected executable precedence, and child exit codes. Runtime effects remain local-CLI-only; the Parallax worker rejects unsupported runtime requests before planning or installation.
+
+This completes the explicit runtime-bundle and project-command slice for the frozen fixture. Curated portable runtime distributions, OS-library provisioning, automatic build/readiness orchestration, and functional Parallax service readiness remain further acceptance gates.

@@ -1,8 +1,8 @@
 # ARCHER 1
 
-Archer 0.2.0-alpha.2. User Commands. 12 October 2026.
+Archer 0.3.0-alpha.1. User Commands. 12 October 2026.
 
-This reference covers the v0.2.0-alpha.2 prerelease, including native worker protocol and frozen npm/Composer replay.
+This reference covers the v0.3.0-alpha.1 runtime and execution slice, including native worker protocol and frozen npm/Composer replay.
 
 ## NAME
 
@@ -15,6 +15,7 @@ archer init [--project DIR]
 archer plan [CAPABILITY ...] [OPTIONS]
 archer install [CAPABILITY ...] [OPTIONS]
 archer i [CAPABILITY ...] [OPTIONS]
+archer run [--project DIR] [--home DIR] [--offline] -- COMMAND [ARG ...]
 archer doctor [CAPABILITY ...] [OPTIONS]
 archer capabilities [--project DIR] [--json]
 archer resolve [CAPABILITY ...] [OPTIONS]
@@ -33,9 +34,9 @@ Archer prepares project capabilities by checking existing services and local sof
 
 For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Missing, stale, or unavailable configured discovery blocks unrestricted fallback. Use `delivery: local` for an explicitly local-only artifact requirement.
 
-This version installs individual raw executable artifacts and replays supported npm v3 and Composer locks. Non-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
+This version installs raw executable artifacts and explicitly pinned PHP/Node runtime bundles, replays supported npm v3 and Composer locks, and launches project commands. Runtime versions must be exact stable pins; other non-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
 
-The prebuilt Archer executable requires no Go toolchain. Go is optional and needed only when compiling or developing Archer from source. Application runtime requirements remain separate: Composer replay verifies PHP and its extensions, and application execution requires compatible PHP or Node as declared by the project.
+The prebuilt Archer executable requires no Go toolchain. Go is optional and needed only when compiling or developing Archer from source. Project runtime declarations choose local reuse or a verified bundle; Composer checks PHP and extensions, and declared Node pins are checked against npm engine requirements.
 
 ## COMMANDS
 
@@ -53,15 +54,46 @@ Evaluate requirements and print a plan with current evidence and remaining work.
 
 Compute a fresh plan, obtain the selected pinned artifacts, verify their SHA-256 digests, and publish them into the project-scoped Archer bin directory. Existing matching managed files are reused after verification; conflicting files are preserved and cause an error. Installed binaries are not executed by the artifact installer.
 
-For a direct npm requirement, replay the whole supported v3 lock into project `node_modules`, including development dependencies and nested placements. Verify SHA-512 archives and stage the complete tree before publication. Existing managed trees are freshly verified; unmanaged, changed, and updated-lock trees are refused. Package code and lifecycle scripts are not executed. Recorded Node engine requirements are reported without runtime provisioning or independent range solving. See `docs/NPM.md`.
+For a direct npm requirement, replay the whole supported v3 lock into project `node_modules`, including development dependencies and nested placements. Verify SHA-512 archives and stage the complete tree before publication. Existing managed trees are freshly verified; unmanaged, changed, and updated-lock trees are refused. Package code and lifecycle scripts are not executed. A declared Node pin is checked against the root and complete selected lock's supported engine ranges. Without a Node runtime declaration, engines are reported without a runtime compatibility claim. See `docs/NPM.md`.
 
 For a direct Composer library requirement, replay the complete supported lock into `vendor`, including development dependencies, and generate PHP autoloading, installed metadata, and PHP binary proxies. Check the selected PHP interpreter and extensions against the complete graph. A directly selected PHP/extension requirement verifies runtime readiness without installing the library tree. Composer is not invoked. Default source policy requires locked SHA-1 distribution checksums; missing checksums need explicit `composer.source_policy` with `mode: source-reference` and trusted hosts. First-download SHA-256 receipts record local provenance and rely on those HTTPS hosts and local receipt trust. Scripts and plugins are skipped. See `docs/COMPOSER.md`.
+
+Prepare selected declared runtimes before dependent package trees. Without selectors, include every runtime declaration. A `composer:` selector includes PHP, an `npm:` selector includes Node, and `runtime:php` or `runtime:node` selects the declared runtime directly. Unrelated capability selectors do not prepare all project runtimes. Reuse requires an exact local version and applicable graph readiness; a configured PHP bundle can replace local PHP that lacks a required extension.
+
+Verify runtime archive SHA-256, extract and inventory a complete bounded tree, probe its version, and publish it under the project scope. Every managed reuse derives expected files, links, and POSIX permissions from the verified cached archive; the runtime receipt alone is insufficient. Modified or unmanaged paths are preserved and rejected. See `docs/RUNTIMES.md`.
 
 Raw artifact publication is sequential; package downloads use bounded concurrency. Earlier successful publications remain if a later backend fails. After installation completes, record verified service, local, and installed outcomes in scoped context. Unresolved requirements are reported and produce exit status 2.
 
 ### i
 
 Alias for `install`.
+
+### run
+
+Execute the explicit command after `--` in the project directory with freshly
+verified declared runtimes. Check relevant frozen Composer PHP/extension and npm
+Node engine requirements before starting the child. Obtain no artifacts,
+prepare no runtimes, and run no catalog or service requests. Prepare the project
+with `archer i` first. This command does not verify the installed package trees;
+`archer i` performs their integrity checks.
+
+Prepend selected runtime bin directories, the scoped Archer bin directory, and
+project `node_modules/.bin` to inherited PATH. A literal `php` or `node` command
+uses the selected interpreter even when its filename differs. Pass argv directly,
+without a shell, and connect standard input, output, and error. Return the child
+exit code. An explicitly named shell is required for shell expressions.
+
+If the resulting PATH would resolve `php` or `node` to a different interpreter
+than its selected runtime, refuse execution before starting the child. Use a
+runtime bundle with its own bin directory to avoid conflicting interpreter paths.
+
+Managed PHP uses its pinned ini or an empty Archer-owned ini through `PHPRC`
+with `PHP_INI_SCAN_DIR` empty. Selected local PHP without an ini declaration keeps
+ambient configuration. Node probes clear `NODE_OPTIONS`; launched commands with
+a declared Node runtime receive it empty too.
+The child receives `ARCHER_HOME`; the parent shell is unchanged. Accept only
+`--project`, `--home`, and `--offline` before the separator. Offline mode does not
+restrict the child's network access or application effects.
 
 ### doctor
 
@@ -85,7 +117,7 @@ Resolution status counts installable routes as covered. It does not claim instal
 
 Read a `parallax.handoff/v1` request addressed to and owned by `archer`. Require its complete `context.approved_resolution` object with schema `archer.approval/v1` and native `recipe_schema: archer.project/v1`. Validate integrity, approved scope, definitions, and routes before execution. Return an evidence-backed `parallax.handoff-result/v1` partition, including remaining work and the next owner.
 
-PHP `archer/v1` installer approvals describe a different executor and are rejected before probes. The current adapter handles native service health, local probes, and raw executable recipes. See `docs/PROTOCOL.md` for the compatibility boundary.
+PHP `archer/v1` installer approvals describe a different executor and are rejected before probes. The current adapter handles native service health, local probes, and raw executable recipes. Runtime preparation and routes dependent on configured runtimes are rejected before effects; use the local project commands. See `docs/PROTOCOL.md` for the compatibility boundary.
 
 ### version
 
@@ -97,7 +129,7 @@ Print command usage and exit. With no arguments, Archer prints help. Also availa
 
 ## OPTIONS
 
-Options may appear before or after the command and capability names. Supply option values as separate arguments; `--option=value` and the `--` end-of-options marker are unsupported.
+Options may appear before or after the command and capability names. Supply option values as separate arguments; `--option=value` is unsupported. The `--` separator is supported only for `run`, where all following arguments belong to the child command.
 
 ### --project DIR
 
@@ -105,7 +137,7 @@ Read project configuration and manifests from DIR. Default: the current director
 
 ### --home DIR
 
-Use DIR for Archer cache, managed binaries, and scoped context. Overrides `ARCHER_HOME`. Default: `ARCHER_HOME` if set, otherwise `.archer` in the user's home directory.
+Use DIR for Archer cache, managed binaries and runtime trees, and scoped context. Overrides `ARCHER_HOME`. Default: `ARCHER_HOME` if set, otherwise `.archer` in the user's home directory.
 
 ### --json
 
@@ -126,6 +158,10 @@ Require `install --stdin` or `i --stdin`. Verify frozen native routes without do
 ### --offline
 
 Skip Archer's catalog refreshes and service health requests. Services remain unverified. Configured local probes still run and are not network-sandboxed. Artifact installation requires bytes already present in the verified content-addressed cache; an uncached recipe pointing to a local source file also remains unresolved. Offline mode does not assume that a remote service is ready.
+
+Runtime installation likewise requires cached archive bytes. Managed runtime reuse
+still verifies those archives and the installed tree and executes current probes.
+`run` obtains no artifacts in either mode, and `--offline` does not sandbox its child.
 
 ### --approval PLAN_ID
 
@@ -153,6 +189,30 @@ Print the executable's version. Use the standalone `archer --version` form.
 
 `recipes` contains raw executable installation recipes with `id`, `provides`, `filename`, optional `platforms`, and `artifact`. The artifact requires `url` and a 64-character SHA-256 digest in `sha256`. Platform names use OS/architecture pairs such as `linux/amd64`. Sources may be HTTPS URLs, absolute regular local files, local file URLs, or HTTP on directly dialed loopback. Artifacts are limited to 256 MiB. Redirects must retain their origin. Cache hits are rehashed before reuse.
 
+`runtimes` is an optional map keyed by `php` and/or `node`. Each entry requires
+an exact stable `version` in `x.y.z` form and accepts a local `binary` candidate,
+an `artifacts` array, and PHP-only `php_ini`. The candidate defaults to its runtime
+name on PATH; paths may be absolute or safe project-relative paths. Each bundle
+declares `platform`, `format` (`raw`, `tar.gz`, or `zip`), `artifact` with `url` and
+`sha256`, `executable` as a safe relative path, and optional exact `strip_prefix`.
+At most one bundle is allowed per platform. Raw bundles cannot strip a prefix.
+
+Managed PHP's `php_ini` names a regular file inside its bundle. Local PHP's ini
+may be absolute or project-relative. Managed PHP without one uses an empty owned
+ini. The bundle must supply compatible extensions and libraries; copying PHP does
+not provision OS libraries. An explicit `composer.php` and `runtimes.php.binary`
+must agree. `init` does not choose runtime pins or sources.
+
+Managed PHP receives `ARCHER_PHP_ROOT` as the owned bundle root. Its ini can use
+`extension_dir="${ARCHER_PHP_ROOT}/ext"` instead of hard-coding a scoped path.
+A selected local ini receives the local executable's directory as that value.
+
+Runtime archives support bounded regular files, directories, and safe internal
+relative symlinks. Traversal, escaping links, hardlinks, devices, case collisions,
+and special files are rejected. Compressed artifacts are limited to 256 MiB,
+expanded runtime trees to 512 MiB, and archives to 50,000 entries. There is no
+runtime catalog, automatic version selection, or source compilation.
+
 ## ENVIRONMENT
 
 ### ARCHER_HOME
@@ -179,9 +239,17 @@ Team scope sent as `X-Slipstream-Team` only to the configured catalog origin. It
 
 Local `services[].token_env` bindings name their own environment variables. A missing configured credential prevents verification; Archer does not retry that binding through an anonymous catalog duplicate. Probes inherit the invoking process's environment, including PATH.
 
+### Runtime child environment
+
+For managed PHP and local PHP with a declared ini, Archer supplies `PHPRC`,
+empties `PHP_INI_SCAN_DIR`, and sets `ARCHER_PHP_ROOT` as described above. A declared
+Node runtime supplies an empty `NODE_OPTIONS`. `run` prepends project runtime and
+executable directories to PATH and sets the selected `ARCHER_HOME` for its child.
+Other environment variables are inherited; Archer does not modify the parent shell.
+
 ### Bootstrap variables
 
-The bootstrap scripts additionally use `ARCHER_VERSION` for the pinned release tag, defaulting to `v0.2.0-alpha.2`, and `ARCHER_DIST_DIR` for a local release directory. These variables do not change CLI version or project recipe selection. Without a local directory, bootstrap obtains the selected binary and checksum manifest from the tagged GitHub release. Neither path requires a Go toolchain.
+The bootstrap scripts additionally use `ARCHER_VERSION` for the pinned release tag, defaulting to `v0.3.0-alpha.1`, and `ARCHER_DIST_DIR` for a local release directory. These variables do not change CLI version or project recipe selection. Without a local directory, bootstrap obtains the selected binary and checksum manifest from the tagged GitHub release. Neither path requires a Go toolchain.
 
 ## FILES
 
@@ -230,6 +298,15 @@ HOME/contexts/SCOPE_KEY.json.lock
 HOME/projects/SCOPE_KEY/bin/FILENAME
     Managed project executables.
 
+HOME/projects/SCOPE_KEY/runtimes/KIND/RUNTIME_ID
+    Project-scoped pinned runtime tree; KIND is php or node.
+
+HOME/projects/SCOPE_KEY/runtimes/KIND/RUNTIME_ID/.archer-runtime.json
+    Runtime receipt and inventory; reuse also derives expectations from the archive.
+
+HOME/projects/SCOPE_KEY/runtimes/KIND/RUNTIME_ID.lock
+    Runtime publication lock directory.
+
 HOME/versions/TAG/bin/archer
     POSIX bootstrap's versioned executable.
 
@@ -246,7 +323,9 @@ SCOPE_KEY is derived from the explicit project scope and canonical absolute proj
 
 ### 0
 
-Command completed successfully. For plan, doctor, and installation, all selected requirements are satisfied. An empty requirement set is satisfied.
+Command completed successfully. For plan, doctor, and installation, all selected requirements and included runtime declarations are satisfied. A project with no selected requirements or runtime declarations is satisfied.
+
+For `run`, the child exited successfully. Other child exit codes are preserved.
 
 For `resolve`, status `satisfied` or `partial` returns 0 because installable routes count as coverage. Its `satisfied` array still contains only verified state.
 
@@ -259,6 +338,10 @@ Configuration, integrity, approval-drift, execution, or output error. If a plan 
 Evaluation completed with remaining requirements. In a plan, this includes artifacts proposed for installation. In an installation, inspect each decision to distinguish verified success from unresolved work.
 
 For `resolve`, 2 means no requirement is covered. For handoff/preflight, 2 means pending or partial verified work.
+
+Before starting a child, `run` returns 2 for unavailable declared runtimes or
+unsatisfied supported runtime graph requirements, and 1 for configuration,
+integrity, or execution errors. Once a child starts, its exit code is preserved.
 
 ## EXAMPLES
 
@@ -303,12 +386,28 @@ Reuse already cached local artifact inputs:
 archer i --offline --home /path/to/archer-state
 ```
 
+Prepare a declared Node runtime and execute project code:
+
+```sh
+archer i runtime:node
+archer run -- node --version
+archer run -- node ./scripts/test.mjs
+```
+
+Run application checks with declared runtimes:
+
+```sh
+archer i
+archer run -- php artisan test
+archer run -- node node_modules/vite/bin/vite.js build
+```
+
 ## LIMITATIONS
 
-General dependency solving, lifecycle hooks, managed runtimes, Docker/Kubernetes/apt adapters, SaaS business actions, legacy PHP installer manifest execution, and automatic worker callbacks are not implemented. npm replay requires a supported v3 registry lock; workspaces, native builds, updated-lock replacement, and Windows executable shims are unsupported. Composer replay requires stable GitHub ZIP distributions and a supported autoload profile; plugins, custom installers, platform overrides, broad root classmaps, and non-PHP executable proxies are unsupported. The JSON `ai_eligible` field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
+General dependency solving, lifecycle hooks, automatic build/readiness orchestration, runtime catalog selection and source compilation, OS libraries and PHP extension provisioning, Docker/Kubernetes/apt adapters, SaaS business actions, legacy PHP installer manifest execution, and automatic worker callbacks are not implemented. npm replay requires a supported v3 registry lock; workspaces, native builds, updated-lock replacement, and Windows executable shims are unsupported. Composer replay requires stable GitHub ZIP distributions and a supported autoload profile; plugins, custom installers, platform overrides, broad root classmaps, and non-PHP executable proxies are unsupported. The JSON `ai_eligible` field is an annotation; no model is invoked. It does not prove complete ecosystem discovery.
 
 Remembered context affects service ordering but never replaces a current health, probe, or hash check. Early installation failures report a partial plan, including prior verified successes, without recording those outcomes into context. Abandoned artifact and context locks require inspection; Archer reports a bounded error rather than automatically deleting them.
 
 ## SEE ALSO
 
-Project README, `docs/DESIGN.md`, `docs/PROTOCOL.md`, `docs/NPM.md`, `docs/COMPOSER.md`, and `examples/archer.json` in the Archer repository: https://github.com/Parallax-Web-Services/archer.
+Project README, `docs/DESIGN.md`, `docs/PROTOCOL.md`, `docs/RUNTIMES.md`, `docs/NPM.md`, `docs/COMPOSER.md`, and `examples/archer.json` in the Archer repository: https://github.com/Parallax-Web-Services/archer.

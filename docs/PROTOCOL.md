@@ -55,6 +55,12 @@ The placeholder is explanatory; execution requires an object, not a string. Requ
 
 Before probes, the adapter validates ownership, approval integrity, operation, subset, dependency bindings, and native definitions. It compares live routes before publication. Verified existing software can skip an approved installer; a different installation route requires a new approval. PHP approvals fail before instructions run because their recipe dialect is different.
 
+Managed runtime preparation is available through the local project commands.
+The worker rejects runtime selectors and routes that depend on a configured
+runtime before probes, downloads, publication, or context writes. Unrelated
+approved service/local/raw-artifact work retains its existing behavior. A v1
+approval does not authorize the added runtime extraction and execution effects.
+
 `parallax.handoff-result/v1` partitions every requested requirement exactly once into `satisfied` and `remaining`, preserving its original text. Satisfaction requires matching verification evidence. Failures retain prior verified successes and return remaining work to the sender. The result ends Archer's ownership of that remaining work.
 
 Preflight checks frozen native routes without artifact download, publication, catalog-cache refresh, or context writes. Missing readiness is pending work rather than a failed installation attempt. Service verification remains an HTTP health check; it does not provision services or prove business integration.
@@ -83,4 +89,4 @@ Stdin accepts one UTF-8 JSON object of at most 2 MiB with bounded nesting, no du
 
 Resolution exits 0 for covered or partially covered plans and 2 when nothing is covered. Handoff/preflight exits 0 for verified completion, 2 for pending or partial work, and 1 for failure. Errors use one JSON response on stdout and diagnostics on stderr.
 
-Local project commands now support frozen npm v3 and Composer replay; package identifiers remain outside the v1 handoff grammar. Managed runtimes, legacy PHP installer manifest compatibility, functional service readiness, and callbacks remain subsequent work. This slice establishes their transport, evidence, and approval boundary.
+Local project commands support frozen npm v3 and Composer replay, explicitly pinned PHP/Node runtimes, and `archer run`. Package/runtime identifiers remain outside the v1 handoff grammar; the native worker does not prepare runtime trees. Legacy PHP installer manifest compatibility, functional service readiness, managed runtime approvals, and callbacks remain subsequent work. See [the runtime guide](RUNTIMES.md) for local preparation and execution.

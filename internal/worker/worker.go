@@ -83,6 +83,9 @@ func Resolve(ctx context.Context, e *archer.Engine, input parallax.Object) (para
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectRuntimeEffects(e.Project, mapped); err != nil {
+		return nil, err
+	}
 	clone := *e
 	if value, exists := mergedContext(workerContext)["probe_installed"]; exists {
 		probe, ok := value.(bool)
@@ -190,6 +193,9 @@ func Execute(ctx context.Context, e *archer.Engine, request parallax.Object, pre
 	if err != nil {
 		return failed(request, preflight, "approval_drift", err, archer.Plan{})
 	}
+	if err := rejectRuntimeEffects(e.Project, mapped); err != nil {
+		return failed(request, preflight, "unsupported_approval", err, archer.Plan{})
+	}
 	if err := validateNativeBinding(e, nodes); err != nil {
 		code := "approval_drift"
 		if errors.Is(err, unsupportedApproval) {
@@ -218,6 +224,12 @@ func Execute(ctx context.Context, e *archer.Engine, request parallax.Object, pre
 	}
 	plan, err := clone.Plan(ctx, planRequirements)
 	if err != nil {
+		// A plan can detect source drift during its own readiness probes.
+		// Preserve the portable approval failure classification before
+		// returning an unrelated operational error from that same plan.
+		if bindingErr := validateNativeBinding(e, nodes); bindingErr != nil {
+			return failed(request, preflight, "approval_drift", bindingErr, archer.Plan{})
+		}
 		return failed(request, preflight, "execution_failed", err, plan)
 	}
 	if err := validateLiveRoutes(e, requirements, nodes, plan, preflight); err != nil {
@@ -338,6 +350,31 @@ func mapRequirements(project archer.Project, originals []string) ([]archer.Requi
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// Native v1 approvals bind only the existing service, local and raw-binary
+// routes. A configured project runtime adds preparation and executable probes
+// to package replay; neither effect is authorized by those route bindings.
+// Reject the entire selection before planning can probe or install any subset.
+func rejectRuntimeEffects(project archer.Project, requirements []archer.Requirement) error {
+	for _, requirement := range requirements {
+		capability := requirement.Capability
+		if strings.HasPrefix(capability, "runtime:") {
+			return fmt.Errorf("%w: managed runtime execution for %s is available through the local CLI only", unsupportedApproval, capability)
+		}
+		kind := ""
+		if strings.HasPrefix(capability, "composer:") {
+			kind = "php"
+		} else if strings.HasPrefix(capability, "npm:") {
+			kind = "node"
+		}
+		if kind != "" {
+			if _, configured := project.Runtimes[kind]; configured {
+				return fmt.Errorf("%w: %s requires configured runtime %s; runtime dependencies are available through the local CLI only", unsupportedApproval, capability, kind)
+			}
+		}
+	}
+	return nil
 }
 
 func approvalNodes(e *archer.Engine, originals []string, mapped []archer.Requirement, plan archer.Plan) (parallax.Object, error) {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Parallax-Web-Services/archer/internal/catalog"
+	"github.com/Parallax-Web-Services/archer/internal/runtimes"
 	"github.com/Parallax-Web-Services/archer/internal/store"
 	"io"
 	"os"
@@ -76,6 +77,7 @@ func packageRequirement(r Requirement) bool {
 	return r.Delivery == "package" || strings.HasPrefix(r.Capability, "composer:") || strings.HasPrefix(r.Capability, "npm:")
 }
 func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, error) {
+	allRuntimes := len(requirements) == 0
 	if len(requirements) == 0 {
 		requirements = e.Project.Requirements
 	}
@@ -88,11 +90,15 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	if err != nil {
 		return Plan{}, err
 	}
-	npmPlan, npmDecisions, err := e.npmPlan(requirements)
+	runtimePlans, runtimeByKind, err := e.runtimePlans(ctx, requirements, allRuntimes)
 	if err != nil {
 		return Plan{}, err
 	}
-	composerPlan, composerRuntime, composerDecisions, err := e.composerPlan(ctx, requirements)
+	npmPlan, npmDecisions, err := e.npmPlan(requirements, runtimeByKind["node"])
+	if err != nil {
+		return Plan{}, err
+	}
+	composerPlan, composerRuntime, composerDecisions, err := e.composerPlan(ctx, requirements, runtimeByKind["php"])
 	if err != nil {
 		return Plan{}, err
 	}
@@ -103,6 +109,7 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	plan := Plan{Schema: "archer.plan/v1", Scope: e.Project.Scope, Platform: runtime.GOOS + "/" + runtime.GOARCH, Decisions: []Decision{}, Remaining: []Requirement{}}
 	plan.NPM = npmPlan
 	plan.Composer, plan.ComposerRuntime = composerPlan, composerRuntime
+	plan.Runtimes = runtimePlans
 	services := append([]catalog.Service{}, e.Project.Services...)
 	bindings := map[string]catalog.Service{}
 	for _, service := range e.Project.Services {
@@ -117,6 +124,9 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	discoverySources := e.Project.Registries
 	needsDiscovery := false
 	for _, r := range requirements {
+		if strings.HasPrefix(r.Capability, "runtime:") {
+			continue
+		}
 		if !packageRequirement(r) && r.Delivery != "local" {
 			needsDiscovery = true
 		}
@@ -149,6 +159,11 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	discoveryUnknown := discoveryState != catalog.StateFresh
 	sort.SliceStable(services, func(i, j int) bool { return services[i].ID < services[j].ID })
 	for _, r := range requirements {
+		if strings.HasPrefix(r.Capability, "runtime:") {
+			d := runtimeDecision(r, runtimeByKind[strings.TrimPrefix(r.Capability, "runtime:")])
+			plan.Decisions = append(plan.Decisions, d)
+			continue
+		}
 		if d, ok := composerDecisions[composerDecisionKey(r)]; ok {
 			plan.Decisions = append(plan.Decisions, d)
 			if pendingDecision(d) {
@@ -287,7 +302,8 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 		NPM             string
 		Composer        string
 		ComposerRuntime any
-	}{e.Project, routes, e.scopeKey, profile.Revision, sources, plan.Platform, services, "", "", composerRuntime}
+		Runtimes        []runtimeIdentity
+	}{e.Project, routes, e.scopeKey, profile.Revision, sources, plan.Platform, services, "", "", composerRuntime, runtimeIdentities(runtimePlans)}
 	if npmPlan != nil {
 		identity.NPM = npmPlan.ID
 	}
@@ -296,7 +312,10 @@ func (e *Engine) Plan(ctx context.Context, requirements []Requirement) (Plan, er
 	}
 	b, _ := json.Marshal(identity)
 	plan.ID = digest(b)
-	return plan, nil
+	if err := e.checkSourceSnapshot(sources); err != nil {
+		return plan, err
+	}
+	return refreshRemaining(plan), nil
 }
 func (e *Engine) supports(r Recipe) bool {
 	return len(r.Platforms) == 0 || provides(r.Platforms, runtime.GOOS+"/"+runtime.GOARCH)
@@ -335,11 +354,26 @@ func refreshRemaining(plan Plan) Plan {
 			plan.Remaining = append(plan.Remaining, d.Requirement)
 		}
 	}
+	for _, selected := range plan.Runtimes {
+		if runtimeReady(&selected) {
+			continue
+		}
+		requirement := runtimeRequirement(selected)
+		found := false
+		for _, remaining := range plan.Remaining {
+			if remaining.Capability == requirement.Capability {
+				found = true
+			}
+		}
+		if !found {
+			plan.Remaining = append(plan.Remaining, requirement)
+		}
+	}
 	return plan
 }
 
 func pendingDecision(d Decision) bool {
-	return d.Status == "unresolved" || d.Status == "install" || d.Status == "npm_install" || d.Status == "npm_skipped" || d.Status == "composer_install"
+	return d.Status == "unresolved" || d.Status == "install" || d.Status == "npm_install" || d.Status == "npm_skipped" || d.Status == "composer_install" || d.Status == "composer_platform_pending" || d.Status == "runtime_install"
 }
 
 const maxProjectSourceBytes = 16 << 20
@@ -411,8 +445,46 @@ func (e *Engine) Install(ctx context.Context, requirements []Requirement, approv
 	if approval != "" && approval != plan.ID {
 		return plan, fmt.Errorf("plan changed since approval; review a fresh plan")
 	}
+	if len(plan.Runtimes) > 0 {
+		approved := plan
+		approved.Runtimes = append([]runtimes.Plan{}, plan.Runtimes...)
+		sources, err := e.sourceHashes()
+		if err != nil {
+			return plan, err
+		}
+		for i := range plan.Runtimes {
+			if plan.Runtimes[i].Status == "unresolved" {
+				continue
+			}
+			prepared, err := e.prepareRuntime(ctx, plan.Runtimes[i])
+			plan.Runtimes[i] = prepared
+			if err != nil {
+				return refreshRemaining(plan), fmt.Errorf("prepare %s runtime: %w", prepared.Kind, err)
+			}
+		}
+		current, err := e.sourceHashes()
+		if err != nil {
+			return refreshRemaining(plan), err
+		}
+		before, _ := json.Marshal(sources)
+		after, _ := json.Marshal(current)
+		if !bytes.Equal(before, after) {
+			return refreshRemaining(plan), fmt.Errorf("project sources changed during runtime preparation; review a fresh plan")
+		}
+		// Runtime readiness can now prove the entire PHP extension/Node engine
+		// graph. This is completion of the approved route, not a new installer.
+		plan, err = e.Plan(ctx, requirements)
+		if err != nil {
+			return plan, err
+		}
+		if approval != "" {
+			if err := compareRuntimeCompletion(approved, plan); err != nil {
+				return refreshRemaining(plan), fmt.Errorf("plan changed since approval during runtime preparation: %w", err)
+			}
+		}
+	}
 	if plan.Composer != nil {
-		report, err := e.installComposer(ctx, plan.Composer)
+		report, err := e.installComposer(ctx, plan.Composer, selectedRuntime(plan.Runtimes, "php"))
 		plan.ComposerReport = &report
 		if err != nil {
 			return refreshRemaining(plan), fmt.Errorf("replay Composer lock: %w", err)
@@ -427,7 +499,7 @@ func (e *Engine) Install(ctx context.Context, requirements []Requirement, approv
 		}
 	}
 	if plan.NPM != nil {
-		report, err := e.installNPM(ctx, plan.NPM)
+		report, err := e.installNPM(ctx, plan.NPM, selectedRuntime(plan.Runtimes, "node"))
 		plan.NPMReport = &report
 		if err != nil {
 			return refreshRemaining(plan), fmt.Errorf("replay npm lock: %w", err)
@@ -435,7 +507,10 @@ func (e *Engine) Install(ctx context.Context, requirements []Requirement, approv
 		for i, d := range plan.Decisions {
 			if d.Status == "npm_install" {
 				plan.Decisions[i].Status = "npm_installed"
-				plan.Decisions[i].Reason = "verified full frozen npm dependency tree; no lifecycle scripts executed and runtime compatibility is untested"
+				plan.Decisions[i].Reason = "verified full frozen npm dependency tree; no lifecycle scripts executed"
+				if selectedRuntime(plan.Runtimes, "node") == nil {
+					plan.Decisions[i].Reason += "; runtime compatibility is untested"
+				}
 				plan.Decisions[i].Evidence = "npm-plan:" + plan.NPM.ID
 				plan.Decisions[i].Cached = report.Downloaded == 0
 			}
@@ -469,12 +544,7 @@ func (e *Engine) Install(ctx context.Context, requirements []Requirement, approv
 		plan.Decisions[i].Reason = "verified artifact installed in the project-scoped Archer bin directory"
 		plan.Decisions[i].Evidence = "sha256:" + recipe.Artifact.SHA256
 	}
-	plan.Remaining = []Requirement{}
-	for _, d := range plan.Decisions {
-		if pendingDecision(d) {
-			plan.Remaining = append(plan.Remaining, d.Requirement)
-		}
-	}
+	plan = refreshRemaining(plan)
 	if err := e.record(plan); err != nil {
 		return plan, fmt.Errorf("record scoped outcomes: %w", err)
 	}

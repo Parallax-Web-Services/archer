@@ -15,7 +15,15 @@ Replace `npm:react` with a direct declaration in that project's `package.json`. 
 
 The manifest's direct declarations must match the lock's root declarations. A selected project requirement with a constraint must exactly match that declaration. Archer binds the original source bytes, normalized OS/CPU/libc target, recorded versions, package paths, and archive integrity into `archer.npm-plan/v1`. Required dependency and peer references must resolve through the recorded ancestor `node_modules` placements. Optional absence requires explicit optional metadata.
 
-Archer replays an existing resolution. It does not independently evaluate npm version ranges, solve peers, select versions, or prove Node engine compatibility. Node engine requirements appear in the plan. Running the application requires a compatible runtime; this backend does not provision one.
+Archer replays an existing resolution. It does not independently evaluate package version ranges, solve peers, or select package versions. Declare an exact `runtimes.node` pin to reuse or prepare Node through the [runtime backend](RUNTIMES.md). Archer checks that pin against the root and complete selected lock's engine ranges before package preparation and `archer run`. Supported engine syntax includes stable numeric comparators, partial/X ranges, caret, tilde, hyphen ranges, intersections, and `||`; prerelease/metadata syntax and unsupported ranges fail explicitly. Without a declared Node runtime, replay retains the existing behavior of reporting engines without claiming runtime compatibility.
+
+```sh
+archer i npm:react --project /path/to/project
+archer run --project /path/to/project -- node ./scripts/test.mjs
+archer run --project /path/to/project -- node node_modules/vite/bin/vite.js build
+```
+
+Selecting npm work prepares the declared Node runtime before `node_modules`. `run` obtains no artifacts and checks runtime readiness again; it executes the requested argv in the project directory and preserves the child exit code. Application commands are explicit; package lifecycle scripts remain unsupported. `--offline` does not restrict the child's network access.
 
 Each selected archive requires a SHA-512 SRI digest. Downloads enter a shared content-addressed cache and are rehashed before extraction or reuse. HTTPS redirects stay on the original origin. HTTP is limited to literal loopback fixture hosts. URL credentials and fragments are rejected.
 

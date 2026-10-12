@@ -6,13 +6,15 @@ The current checkout adds an initial [native worker adapter](PROTOCOL.md),
 strict handoff/approval validation, a PHP transport bridge, and explicit discovery
 states. That advances Gate 1; complete PHP recipe compatibility, catalog coverage,
 and functional service readiness still require implementation. The checkout also
-adds [frozen npm v3 replay](NPM.md) and [Composer replay](COMPOSER.md), the package
-portion of Gate 2. Managed runtimes, authorized build orchestration, and service
-contract readiness remain pending.
+adds [frozen npm v3 replay](NPM.md), [Composer replay](COMPOSER.md), and
+[explicit PHP/Node runtime preparation and command execution](RUNTIMES.md).
+These implement the local runtime/package portion of Gate 2. Fresh-host OS and
+library provisioning, automatic build orchestration, and service contract
+readiness remain pending.
 
 Archer is the solo installer and environment coordinator for Zefram. A developer should be able to check out an application, run `archer i`, and receive a usable environment without personally operating Composer, npm, Docker, Kubernetes, or apt. Archer first asks what the project needs and what the user can already use. It connects a suitable existing service, reuses compatible local software and verified cached work, and installs or builds only what remains. Slipstream handles genuinely unresolved work after those routes have been exhausted.
 
-The Go core implements explicit requirements, service discovery, live checks, verified executable caching, scoped installation, outcome memory, and locked PHP/npm dependency preparation. The frozen Zefram application now passes its PHP/JavaScript tests with both trees installed by Archer. A complete fresh-host journey still needs managed runtimes and authorized build/readiness execution through the same interface.
+The Go core implements explicit requirements, service discovery, live checks, verified executable caching, scoped installation, outcome memory, locked PHP/npm dependency preparation, pinned runtime bundles, and direct project command execution. The frozen Zefram application passes its PHP/JavaScript tests with both package trees installed by Archer. Runtime preparation is now explicit; a complete fresh-host journey still needs the application's OS libraries, supported PHP distribution policy, and automatic build/service readiness orchestration.
 
 ## The product contract
 
@@ -41,15 +43,17 @@ The existing command names support the intended sequence:
 archer init
 archer plan --json
 archer i
+archer run -- php artisan test
+archer run -- node node_modules/vite/bin/vite.js build
 ```
 
 In the completed product, `init` detects the project without changing its dependency meaning. Planning detects the actual execution host, reads package locks, checks team service bindings, and produces the remaining execution graph. Installation prepares required runtimes, materializes packages, connects services, executes permitted build steps, and verifies the application's declared readiness check. Running this in CI uses the same pinned inputs and policy.
 
 For example, a project that needs PHP, Node, a frontend build, and a database should end with PHP and Node available in its managed environment, application libraries installed in compatible layouts, the frontend built, and the configured database verified through its adapter. The database step connects the existing team service. It creates no local database container. A second run performs current readiness and integrity checks while reusing the completed work.
 
-The managed environment must also be usable. An installer cannot change its parent shell's PATH. The target `archer run <command ...>` launches application commands with the selected runtimes and environment; generated project launchers or explicit shell activation support direct use. The readiness check runs in that same environment. `archer run` and activation are proposed interfaces, not current commands. Today Archer prints managed binary paths for the user to add to PATH.
+The managed environment must also be usable. An installer cannot change its parent shell's PATH. `archer run -- <command ...>` now launches an explicit argument array in the project directory with freshly verified declared runtimes, selected PHP configuration, and project executable paths. It passes standard streams and preserves the child's exit code. It performs no preparation or downloads, so the application must first be prepared with `archer i`. Automatic shell activation and declared build/readiness scheduling remain future work.
 
-That is a target scenario. Current source can replay supported npm v3 and Composer locks, generate PHP autoloading, check existing PHP requirements, install raw executable recipes, and check a configured service's HTTP health. There is no managed runtime manager, frontend build executor, or application readiness orchestration. The acceptance fixture uses existing PHP/Node runtimes and separately executes its declared application checks.
+The complete scenario remains the acceptance target. Current source replays supported npm v3 and Composer locks, generates PHP autoloading, checks runtime graphs, prepares explicitly pinned PHP/Node bundles or reuses exact compatible local interpreters, installs raw executable recipes, and checks a configured service's HTTP health. Requested frontend and application commands can run through `archer run`; an automatic frontend build graph and application/service readiness orchestration are not yet implemented. A pinned PHP bundle must already contain compatible extensions and depend on available host libraries; Archer does not compile PHP or provision those OS libraries.
 
 ## The implemented baseline
 
@@ -73,7 +77,7 @@ Go is an implementation and development dependency, not an end-user prerequisite
 
 ## Target architecture
 
-The core remains deterministic. Ecosystem-specific adapters supply discovery, compatibility, execution, and verification behind a shared plan. The diagram describes the target architecture. Native handoffs and initial npm/Composer replay backends exist; full package compatibility, runtimes, deployment, result caching, and callback orchestration remain pending.
+The core remains deterministic. Ecosystem-specific adapters supply discovery, compatibility, execution, and verification behind a shared plan. The diagram describes the target architecture. Native handoffs, initial npm/Composer replay, and explicitly pinned runtime preparation exist; full package compatibility, deployment, build/result caching, and callback orchestration remain pending.
 
 ```mermaid
 flowchart TD
@@ -95,7 +99,7 @@ flowchart TD
 
 ### Requirements and service substitution
 
-A requirement needs a stable identity, a delivery kind, compatibility constraints, and a verification contract. The current `delivery` values are `service`, `local`, and `package`. Runtime and deployment requirements will need additional typed contracts through additive fields or a new schema version.
+A requirement needs a stable identity, a delivery kind, compatibility constraints, and a verification contract. The current `delivery` values are `service`, `local`, and `package`. The additive `runtimes` map defines exact PHP/Node pins and platform bundles; `runtime:php` and `runtime:node` use local delivery. Deployment requirements need their own typed contracts.
 
 Service selection must establish three different facts. Discovery establishes that a provider advertises a capability. Binding establishes the intended account, endpoint, and permitted access. Readiness establishes that the bound provider can fulfill this requirement. The catalog never grants access on the user's behalf.
 
@@ -119,7 +123,7 @@ Today, the local plan ID includes project source hashes, scope, context revision
 
 Each target adapter exposes five operations: discover candidates, resolve compatible inputs, describe effects, apply the selected route, and verify its postconditions. The core schedules and journals those operations. It does not accept catalog-supplied shell commands or credential-variable names as executable authority.
 
-Local installation stages files in managed directories, verifies contents, and publishes the completed result. A package tree needs a single tree-level publication boundary; the current store guarantees publication only for individual files. Runtime switching and application activation must occur after dependent verification succeeds.
+Local installation stages files in owned directories, verifies contents, and publishes the completed result. Supported package and runtime backends now publish complete staged trees by rename. Runtime installation completes before dependent package work; current version, extension, and engine checks establish the selected interpreter's compatibility. Runtime reuse reconstructs expected tree inventory from the pinned archive rather than trusting an editable receipt. There is no transaction-wide rollback: earlier verified publication remains if later work fails.
 
 External operations need idempotency identities and ownership records. A reused team database is not owned by the current installation. A newly provisioned resource is owned only according to the authorized task and its retention policy. Remote provisioning, migrations, and native package changes can have effects that cannot be rolled back automatically; the plan must declare the recovery action instead of promising a universal undo.
 
@@ -161,8 +165,8 @@ The target hierarchy is:
 | Cache layer | Reuse identity and invalidation | Implementation state |
 | --- | --- | --- |
 | Discovery metadata | Catalog source, credential/team scope, coverage, and expiry; refresh failure retains a stale diagnostic | Implemented with source and credential/team identity plus a fixed 300 second TTL; coverage contract pending |
-| Artifact bytes | Content digest; verify bytes on each reuse, independent of download location | Implemented SHA-256 store for raw artifacts |
-| Prepared package/runtime trees | Exact package graph, artifacts, adapter version, platform/ABI, and relevant preparation policy | Pending |
+| Artifact bytes | Content digest; verify bytes on each reuse, independent of download location | Implemented SHA-256 raw/runtime archive store, SHA-512 npm archives, and Composer archive provenance receipts |
+| Prepared package/runtime trees | Exact package graph, artifacts, adapter version, platform/ABI, and relevant preparation policy | Project-owned npm/Composer/runtime trees are staged and freshly verified from archives; a shared preparation-result cache is pending |
 | Deterministic build results | Source tree, dependency lock, runtime/toolchain, declared environment inputs, target, and action definition | Pending |
 | Reusable solution knowledge | Capability contract, context boundaries, recipe provenance, compatibility, and verification results | Pending; retrieved proposals still need current validation |
 
@@ -170,7 +174,7 @@ Mutable files, build outputs, and tenant-specific results cannot be treated like
 
 The current per-digest lock prevents concurrent downloads of the same raw artifact. The target action lock coordinates identical preparation or build work and publishes one complete verified result. Failed or abandoned work never becomes a cache hit. Stale catalog evidence cannot authorize installation or generation merely to avoid a network error.
 
-This is the required hierarchy. v0.1.0 implements the first two layers; complete Slipstream cache parity is not established.
+This is the required hierarchy. v0.1.0 implemented the first two layers; subsequent slices add verified package/runtime trees with shared archive bytes and isolated mutable state. Complete Slipstream cache parity and build-result caching are not established.
 
 ## Learning the user context
 
@@ -186,7 +190,24 @@ Before expanding learning, Archer needs inspect/export/reset operations and a po
 
 ## Replacing Composer and npm
 
-The first package milestone should replay existing locks before attempting a general solver. Exact locked inputs give a bounded compatibility target and a measurable path from checkout to working application. The implementation remains Archer's engine rather than a permanent wrapper that delegates ordinary installs to Composer or npm.
+The first package milestone replays existing locks before attempting a general solver. Exact locked inputs give a bounded compatibility target and a measurable path from checkout to working application. The implementation remains Archer's engine rather than a permanent wrapper that delegates ordinary installs to Composer or npm.
+
+The local runtime slice requires explicit exact `x.y.z` PHP/Node versions and
+SHA-256-pinned `raw`, `tar.gz`, or `zip` bundles for each intended platform. It
+reuses a freshly verified exact local interpreter when compatible with the
+selected graph. A pinned bundle can replace local PHP that lacks an extension.
+Node pins are checked against the root and complete selected npm lock's supported
+stable engine ranges. There is no invented runtime catalog or automatic `latest`
+selection. A successful host probe is required; a platform name alone does not
+prove ABI or library compatibility.
+
+Runtime archive bytes share the content cache, while prepared trees live under
+the project scope. Managed PHP uses a declared bundle ini or an empty owned ini
+and disables ambient ini scanning. `archer run` verifies declared runtimes and
+applicable frozen graph readiness, then invokes the requested argv directly.
+The [runtime contract](RUNTIMES.md) defines selection, extraction, integrity,
+configuration, and execution. Managed runtime effects remain outside the Parallax
+v1 worker's current approval dialect and are rejected before execution there.
 
 The first end-to-end target is Linux/amd64 with one frozen application repository revision and its committed locks. Runtime versions, PHP extensions, required package features, the bound service, and the readiness command must be recorded with that fixture before implementation begins. Windows/macOS application support follows native acceptance runs; cross-built Archer binaries alone do not establish it. This confines the first compatibility claim while leaving the current standalone-artifact CLI available across its build targets.
 
@@ -204,7 +225,7 @@ General version solving, alternative repository types, broad plugin support, and
 
 The initial distribution is a per-user, versioned bootstrap in the nvm and Composer style. POSIX and PowerShell scripts choose a prebuilt platform artifact, verify its SHA-256 against the release manifest, retain versioned installations, and provide a launcher and PATH instruction. This path requires no Go toolchain. Go is needed only for optional source builds and development. Package-manager listings can follow once this path is stable.
 
-The [v0.2.0-alpha.2 prerelease](https://github.com/Parallax-Web-Services/archer/releases/tag/v0.2.0-alpha.2) distributes six raw binaries and `SHA256SUMS` through a tagged release workflow. The bootstrap obtains the selected artifact from that release or accepts a prepared local release directory through `ARCHER_DIST_DIR`; both paths avoid requiring the user to compile Archer. Windows/amd64 and Linux/amd64 have native execution checks. Darwin and arm64 artifacts are cross-built, which does not establish native application support. The current scripts avoid elevated privilege and shell startup edits and preserve unmanaged conflicting paths.
+The [v0.3.0-alpha.1 prerelease](https://github.com/Parallax-Web-Services/archer/releases/tag/v0.3.0-alpha.1) distributes six raw binaries and `SHA256SUMS` through a tagged release workflow. The bootstrap obtains the selected artifact from that release or accepts a prepared local release directory through `ARCHER_DIST_DIR`; both paths avoid requiring the user to compile Archer. Windows/amd64 and Linux/amd64 have native execution checks. Darwin and arm64 artifacts are cross-built, which does not establish native application support. The current scripts avoid elevated privilege and shell startup edits and preserve unmanaged conflicting paths.
 
 Checksums establish consistency with the manifest. Release trust also needs signed publisher metadata, immutable release policy, a reproducible build record, supported upgrade/rollback behavior, and native validation for claimed platforms. Those are release gates, not properties established by hashing an asset downloaded alongside its manifest.
 
@@ -226,4 +247,7 @@ The strongest first acceptance test is functional: on a fresh supported user env
 
 Gate 2 is the threshold for calling Archer a useful Zefram installer. General replacement claims require the wider compatibility and environment evidence in later gates. AI fallback is added only after unresolved work can travel through the existing protocol with complete reasons, bounded attempts, and verifiable results.
 
-The immediate implementation sequence is protocol compatibility and discovery correctness, then the locked PHP/Node application slice. That sequence turns the current safe byte installer into a product a developer can depend on while keeping the service-first and cache-first decisions intact.
+The next acceptance step joins these local runtime/package capabilities with
+declared build actions and functional service readiness on a supported fresh
+environment. It must retain service-first selection, current integrity checks,
+isolated mutable trees, and explicit evidence for what remains.

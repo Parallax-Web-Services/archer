@@ -6,6 +6,7 @@ import (
 	"github.com/Parallax-Web-Services/archer/internal/catalog"
 	"github.com/Parallax-Web-Services/archer/internal/composer"
 	"github.com/Parallax-Web-Services/archer/internal/npm"
+	"github.com/Parallax-Web-Services/archer/internal/runtimes"
 	"github.com/Parallax-Web-Services/archer/internal/store"
 	"regexp"
 	"strings"
@@ -42,14 +43,15 @@ type Recipe struct {
 	Artifact  store.Artifact `json:"artifact"`
 }
 type Project struct {
-	Schema       string            `json:"schema"`
-	Scope        string            `json:"scope"`
-	Requirements []Requirement     `json:"requirements"`
-	Services     []catalog.Service `json:"services,omitempty"`
-	Local        []LocalCapability `json:"local,omitempty"`
-	Registries   []string          `json:"registries,omitempty"`
-	Recipes      []Recipe          `json:"recipes,omitempty"`
-	Composer     *ComposerConfig   `json:"composer,omitempty"`
+	Schema       string                   `json:"schema"`
+	Scope        string                   `json:"scope"`
+	Requirements []Requirement            `json:"requirements"`
+	Services     []catalog.Service        `json:"services,omitempty"`
+	Local        []LocalCapability        `json:"local,omitempty"`
+	Registries   []string                 `json:"registries,omitempty"`
+	Recipes      []Recipe                 `json:"recipes,omitempty"`
+	Composer     *ComposerConfig          `json:"composer,omitempty"`
+	Runtimes     map[string]runtimes.Spec `json:"runtimes,omitempty"`
 }
 
 type ComposerConfig struct {
@@ -81,6 +83,7 @@ type Plan struct {
 	Composer        *composer.Plan        `json:"composer,omitempty"`
 	ComposerReport  *composer.Report      `json:"composer_report,omitempty"`
 	ComposerRuntime *composer.RuntimeInfo `json:"composer_runtime,omitempty"`
+	Runtimes        []runtimes.Plan       `json:"runtimes,omitempty"`
 }
 type Context struct {
 	Schema   string            `json:"schema"`
@@ -106,7 +109,23 @@ func (p Project) Validate() error {
 	if strings.TrimSpace(p.Scope) == "" {
 		return fmt.Errorf("project scope is required")
 	}
+	for kind, spec := range p.Runtimes {
+		if err := runtimes.Validate(kind, spec); err != nil {
+			return fmt.Errorf("runtime %s: %w", kind, err)
+		}
+		if kind == "php" && p.Composer != nil && p.Composer.PHP != "" && spec.Binary != "" && p.Composer.PHP != spec.Binary {
+			return fmt.Errorf("composer.php and runtimes.php.binary must select the same interpreter")
+		}
+	}
 	for _, r := range p.Requirements {
+		if strings.HasPrefix(r.Capability, "runtime:") {
+			if r.Delivery != "" && r.Delivery != "local" {
+				return fmt.Errorf("runtime requirements must use local delivery")
+			}
+			if spec, exists := p.Runtimes[strings.TrimPrefix(r.Capability, "runtime:")]; exists && r.Constraint != "" && r.Constraint != spec.Version {
+				return fmt.Errorf("runtime requirement constraint differs from its exact configured version")
+			}
+		}
 		if !slug.MatchString(r.Capability) {
 			return fmt.Errorf("invalid capability %q; use an explicit capability slug", r.Capability)
 		}
