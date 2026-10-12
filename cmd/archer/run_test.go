@@ -66,7 +66,12 @@ func TestRunCLIPassesStdioCwdAndChildExit(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatal(err, out.String())
 	}
-	if strings.Join(result.Args, "\x00") != strings.Join(args[len(args)-4:], "\x00") || result.Input != "child input\n" || result.Cwd != project || diagnostics.String() != "fixture diagnostics\n" {
+	if strings.Join(result.Args, "\x00") != strings.Join(args[len(args)-4:], "\x00") || result.Input != "child input\n" || diagnostics.String() != "fixture diagnostics\n" {
 		t.Fatal(result, diagnostics.String())
+	}
+	actual, actualErr := os.Stat(result.Cwd)
+	expected, expectedErr := os.Stat(project)
+	if actualErr != nil || expectedErr != nil || !actual.IsDir() || !os.SameFile(actual, expected) {
+		t.Fatalf("child working directory %q does not identify project %q: %v %v", result.Cwd, project, actualErr, expectedErr)
 	}
 }

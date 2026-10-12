@@ -1,7 +1,7 @@
 # Pinned, per-user Archer bootstrap. Downloaded binaries are never executed here.
 $ErrorActionPreference = 'Stop'
-$version = if ($env:ARCHER_VERSION) { $env:ARCHER_VERSION } else { 'v0.3.0-alpha.1' }
-if ($version -notmatch '^v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$' -or $version.Contains('..')) { throw 'ARCHER_VERSION must be a safe pinned version, for example v0.3.0-alpha.1.' }
+$version = if ($env:ARCHER_VERSION) { $env:ARCHER_VERSION } else { 'v0.3.0-alpha.2' }
+if ($version -notmatch '^v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$' -or $version.Contains('..')) { throw 'ARCHER_VERSION must be a safe pinned version, for example v0.3.0-alpha.2.' }
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'This installer supports Windows. Use install.sh on Linux or macOS.' }
 $machine = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $arch = switch ($machine.ToLowerInvariant()) { 'amd64' { 'amd64' } 'arm64' { 'arm64' } default { throw 'Supported architectures: amd64 and arm64.' } }

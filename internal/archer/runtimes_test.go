@@ -99,15 +99,27 @@ func TestRunUsesSelectedCustomInterpreterAndPreservesChildContract(t *testing.T)
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatal(err, output.String())
 	}
-	if strings.Join(result.Argv, "\x00") != strings.Join(args[1:], "\x00") || result.Stdin != "literal input\n" || result.Cwd != e.ProjectDir || result.Home != e.Home || result.NodeOptions != "" {
+	if strings.Join(result.Argv, "\x00") != strings.Join(args[1:], "\x00") || result.Stdin != "literal input\n" || result.Home != e.Home || result.NodeOptions != "" {
 		t.Fatal(result)
 	}
-	if !strings.HasPrefix(result.Path, filepath.Dir(binary)+string(os.PathListSeparator)) || diagnostics.String() != "child diagnostics\n" {
+	assertRuntimeDirectory(t, result.Cwd, e.ProjectDir)
+	paths := filepath.SplitList(result.Path)
+	if len(paths) == 0 || diagnostics.String() != "child diagnostics\n" {
 		t.Fatal(result, diagnostics.String())
 	}
+	assertRuntimeDirectory(t, paths[0], filepath.Dir(binary))
 	entries, err := os.ReadDir(e.Home)
 	if err != nil || len(entries) != 0 {
 		t.Fatal("run installed or wrote Archer state", entries, err)
+	}
+}
+
+func assertRuntimeDirectory(t *testing.T, actualPath, expectedPath string) {
+	t.Helper()
+	actual, actualErr := os.Stat(actualPath)
+	expected, expectedErr := os.Stat(expectedPath)
+	if actualErr != nil || expectedErr != nil || !actual.IsDir() || !os.SameFile(actual, expected) {
+		t.Fatalf("directory %q does not identify %q: %v %v", actualPath, expectedPath, actualErr, expectedErr)
 	}
 }
 

@@ -242,7 +242,12 @@ func TestManagedPHPUsesImmutableDeclaredConfiguration(t *testing.T) {
 	if err != nil || found.Status != "local" || found.Environment["PHPRC"] != ini {
 		t.Fatalf("local PHP ini = %#v %v", found, err)
 	}
-	if found.Environment["ARCHER_PHP_ROOT"] != filepath.Dir(local) {
+	localRoot, err := os.Stat(filepath.Dir(local))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectedRoot, err := os.Stat(found.Environment["ARCHER_PHP_ROOT"])
+	if err != nil || !selectedRoot.IsDir() || !os.SameFile(localRoot, selectedRoot) {
 		t.Fatalf("local PHP root environment %#v", found.Environment)
 	}
 }
