@@ -1,8 +1,8 @@
 # ARCHER 1
 
-Archer 0.2.0-alpha.1. User Commands. 12 October 2026.
+Archer 0.2.0-alpha.2. User Commands. 12 October 2026.
 
-This reference covers the v0.2.0-alpha.1 prerelease, including native worker protocol and frozen npm/Composer replay.
+This reference covers the v0.2.0-alpha.2 prerelease, including native worker protocol and frozen npm/Composer replay.
 
 ## NAME
 
@@ -181,7 +181,7 @@ Local `services[].token_env` bindings name their own environment variables. A mi
 
 ### Bootstrap variables
 
-The bootstrap scripts additionally use `ARCHER_VERSION` for the pinned release tag, defaulting to `v0.2.0-alpha.1`, and `ARCHER_DIST_DIR` for a local release directory. These variables do not change CLI version or project recipe selection. Without a local directory, bootstrap obtains the selected binary and checksum manifest from the tagged GitHub release. Neither path requires a Go toolchain.
+The bootstrap scripts additionally use `ARCHER_VERSION` for the pinned release tag, defaulting to `v0.2.0-alpha.2`, and `ARCHER_DIST_DIR` for a local release directory. These variables do not change CLI version or project recipe selection. Without a local directory, bootstrap obtains the selected binary and checksum manifest from the tagged GitHub release. Neither path requires a Go toolchain.
 
 ## FILES
 

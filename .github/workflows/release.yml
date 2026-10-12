@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Pinned release tag, for example v0.2.0-alpha.1'
+        description: 'Pinned release tag, for example v0.2.0-alpha.2'
         required: true
         type: string
       publish:
@@ -141,7 +141,7 @@ jobs:
         run: |
           set -euo pipefail
           binary="$(pwd)/dist/release/archer_linux_amd64"
-          output="$(env -i PATH=/archer-no-toolchain "$binary" version)"
+          output="$(env -i PATH=/archer-no-toolchain ARCHER_HOME="$RUNNER_TEMP/archer-smoke" "$binary" version)"
           [[ "$output" == "Archer $RELEASE_VERSION" ]]
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -59,7 +59,7 @@ install a pinned version under a per-user `ARCHER_HOME`, verify SHA-256 before
 placement, retain old versions, and print PATH setup. They do not modify shell
 startup files, use sudo, or execute downloaded binaries.
 
-Use the [v0.2.0-alpha.1 prerelease](https://github.com/Parallax-Web-Services/archer/releases/tag/v0.2.0-alpha.1).
+Use the [v0.2.0-alpha.2 prerelease](https://github.com/Parallax-Web-Services/archer/releases/tag/v0.2.0-alpha.2).
 It supplies Linux, macOS and Windows binaries for amd64 and arm64, plus
 `SHA256SUMS`. Windows/amd64 and Linux/amd64 have native execution checks;
 macOS and arm64 artifacts are cross-built. The package backends have additional
@@ -68,16 +68,16 @@ platform limits documented in their respective guides.
 On Linux/macOS, download the pinned bootstrap script and run it:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.2.0-alpha.1/scripts/install.sh -o archer-install.sh
-ARCHER_VERSION=v0.2.0-alpha.1 sh ./archer-install.sh
+curl -fsSL https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.2.0-alpha.2/scripts/install.sh -o archer-install.sh
+ARCHER_VERSION=v0.2.0-alpha.2 sh ./archer-install.sh
 export PATH="$HOME/.archer/bin:$PATH"
 ```
 
 For Windows:
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.2.0-alpha.1/scripts/install.ps1" -OutFile archer-install.ps1
-$env:ARCHER_VERSION = "v0.2.0-alpha.1"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.2.0-alpha.2/scripts/install.ps1" -OutFile archer-install.ps1
+$env:ARCHER_VERSION = "v0.2.0-alpha.2"
 powershell -NoProfile -ExecutionPolicy Bypass -File ./archer-install.ps1
 $env:PATH = "$HOME/.archer/bin;$env:PATH"
 ```
@@ -87,7 +87,7 @@ release. To use a prepared local release directory instead, set `ARCHER_DIST_DIR
 when running the same script:
 
 ```sh
-ARCHER_DIST_DIR="/path/to/release" ARCHER_VERSION=v0.2.0-alpha.1 sh ./archer-install.sh
+ARCHER_DIST_DIR="/path/to/release" ARCHER_VERSION=v0.2.0-alpha.2 sh ./archer-install.sh
 ```
 
 On Windows, set `$env:ARCHER_DIST_DIR = "C:/path/to/release"` before running
