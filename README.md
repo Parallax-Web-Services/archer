@@ -2,6 +2,12 @@
 
 Straight & steady. One installer for Zefram and the Parallax ecosystem.
 
+Install and run Archer as a standalone executable. **Go is optional**: it is
+needed only to build Archer from source or develop it. A prebuilt Archer needs
+no Go, PHP, Node, Composer, npm, Docker, Kubernetes or system package manager
+to start. Projects still need compatible runtimes for their own execution;
+Composer replay checks PHP and its extensions before preparing the PHP tree.
+
 Read the [product and technical design](docs/DESIGN.md) for the complete product
 contract, current boundaries, Slipstream integration, caching architecture, and
 the acceptance gates for a working Zefram environment.
@@ -24,12 +30,12 @@ The [Zefram acceptance record](docs/VALIDATION.md) reports the real fixture's
 offline replay of both dependency trees.
 
 [Frozen Composer replay](docs/COMPOSER.md) now prepares the locked PHP `vendor`
-tree, autoloader, runtime metadata, and PHP executable proxies directly in Go.
+tree, autoloader, runtime metadata, and PHP executable proxies in Archer.
 PHP and extensions are checked before installation. Locks without archive
 checksums require an explicit source-reference policy in `archer.json`.
 
-Archer is a clean-sheet, dependency-free Go CLI. The executable needs no PHP,
-Node, Composer, npm, Docker, Kubernetes or system package manager to start.
+Archer is a clean-sheet CLI implemented in Go, with no third-party module
+dependencies. Its implementation language adds no toolchain requirement for users.
 
 The first milestone implements an explicit decision order:
 
@@ -46,27 +52,66 @@ use an explicit `delivery: local` requirement for a local-only artifact route.
 Package requirements cannot be satisfied by a similarly named
 remote API. **There are no model calls in this version.**
 
-## Use the local build
+## Install Archer
 
-Build current source for the protocol and package commands:
+Following the nvm/Composer distribution approach, the POSIX and PowerShell scripts
+install a pinned version under a per-user `ARCHER_HOME`, verify SHA-256 before
+placement, retain old versions, and print PATH setup. They do not modify shell
+startup files, use sudo, or execute downloaded binaries.
+
+Use the [v0.2.0-alpha.1 prerelease](https://github.com/Parallax-Web-Services/archer/releases/tag/v0.2.0-alpha.1).
+It supplies Linux, macOS and Windows binaries for amd64 and arm64, plus
+`SHA256SUMS`. Windows/amd64 and Linux/amd64 have native execution checks;
+macOS and arm64 artifacts are cross-built. The package backends have additional
+platform limits documented in their respective guides.
+
+On Linux/macOS, download the pinned bootstrap script and run it:
 
 ```sh
-go build -trimpath -buildvcs=false -o dist/archer ./cmd/archer
-dist/archer version
+curl -fsSL https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.2.0-alpha.1/scripts/install.sh -o archer-install.sh
+ARCHER_VERSION=v0.2.0-alpha.1 sh ./archer-install.sh
+export PATH="$HOME/.archer/bin:$PATH"
 ```
 
-The first local release artifacts below predate these extensions and are not published:
+For Windows:
+
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Parallax-Web-Services/archer/v0.2.0-alpha.1/scripts/install.ps1" -OutFile archer-install.ps1
+$env:ARCHER_VERSION = "v0.2.0-alpha.1"
+powershell -NoProfile -ExecutionPolicy Bypass -File ./archer-install.ps1
+$env:PATH = "$HOME/.archer/bin;$env:PATH"
+```
+
+The scripts obtain the selected binary and checksum manifest from that tagged
+release. To use a prepared local release directory instead, set `ARCHER_DIST_DIR`
+when running the same script:
 
 ```sh
-./dist/v0.1.0/archer_linux_amd64 version
-./dist/v0.1.0/archer_linux_amd64 init
-./dist/v0.1.0/archer_linux_amd64 plan --json
-./dist/v0.1.0/archer_linux_amd64 i --plan
-./dist/v0.1.0/archer_linux_amd64 i
-./dist/v0.1.0/archer_linux_amd64 context
+ARCHER_DIST_DIR="/path/to/release" ARCHER_VERSION=v0.2.0-alpha.1 sh ./archer-install.sh
 ```
 
-On Windows use `archer_windows_amd64.exe`. Flags can follow capabilities:
+On Windows, set `$env:ARCHER_DIST_DIR = "C:/path/to/release"` before running
+`./archer-install.ps1`. The directory must contain the selected platform binary
+and `SHA256SUMS`; Go is not needed for this path either.
+
+Checksums establish integrity against the release manifest; they are not
+publisher signatures. Existing unmanaged binaries and directories are preserved.
+System package-manager listings are a later distribution step.
+
+## Use Archer
+
+After installation and PATH setup:
+
+```sh
+archer version
+archer init
+archer plan --json
+archer i --plan
+archer i
+archer context
+```
+
+Flags can follow capabilities:
 `archer plan database --project /path/to/project --json`.
 
 Exit codes: **0** all requirements satisfied, **2** remaining work,
@@ -79,34 +124,6 @@ constraints in `archer.json`. It refuses to overwrite an existing configuration.
 Supported npm v3 and stable GitHub Composer locks can now be replayed directly.
 Managed runtimes, general dependency solving, and lifecycle execution remain
 subsequent work. See the backend documents for their supported profiles.
-
-## Direct bootstrap distribution
-
-Following the nvm/Composer distribution approach, the POSIX and PowerShell scripts
-install a pinned version under a per-user `ARCHER_HOME`, verify SHA-256 before
-placement, retain old versions, and print PATH setup. They do not modify shell
-startup files, use sudo, or execute downloaded binaries.
-
-For the local release on Linux/macOS:
-
-```sh
-ARCHER_DIST_DIR="$PWD/dist/v0.1.0" ARCHER_VERSION=v0.1.0 sh scripts/install.sh
-export PATH="$HOME/.archer/bin:$PATH"
-```
-
-For Windows:
-
-```powershell
-$env:ARCHER_DIST_DIR = "$PWD/dist/v0.1.0"
-$env:ARCHER_VERSION = "v0.1.0"
-./scripts/install.ps1
-$env:PATH = "$HOME/.archer/bin;$env:PATH"
-```
-
-Omitting `ARCHER_DIST_DIR` selects the pinned GitHub release URL. No release has
-been published yet. Checksums establish integrity against the release manifest;
-they are not publisher signatures. Existing unmanaged binaries and directories
-are preserved. System package-manager listings are a later distribution step.
 
 ## Project context and services
 
@@ -184,23 +201,30 @@ Scope includes the project identity and its explicit scope name. Memory influenc
 selection but never replaces current service/probe/hash verification. Planning
 does not persist learned outcomes. Cached bytes are shared; context is project-scoped.
 
-## Develop and verify
+## Optional source build and development
 
-Go 1.24+ is needed only to develop Archer. There are no module dependencies.
+Use Go 1.24+ only if you choose to build or develop Archer. There are no module
+dependencies. The installed executable does not locate or invoke `go`.
+
+```sh
+go build -trimpath -buildvcs=false -o dist/archer ./cmd/archer
+./dist/archer version
+```
+
+To verify development changes:
 
 ```sh
 go test ./...
-go build -trimpath -buildvcs=false -o dist/archer ./cmd/archer
 python scripts/test-installers.py
 ```
 
 `scripts/release.ps1` cross-builds Linux, macOS and Windows for amd64 and arm64,
 then writes `SHA256SUMS`. Cross-compilation is not native-platform execution QA.
 
-Current limits: Composer/npm package resolution and installation, managed runtime
+Current limits: general Composer/npm dependency solving, managed runtime
 provisioning, Docker/Kubernetes/apt adapters, SaaS business-action execution,
 automatic Slipstream worker callbacks, and AI fallback are future slices.
-Archer currently prepares and installs pinned raw artifacts, verifies available
-capabilities, and returns the remaining work honestly.
+Archer currently replays its supported locks, prepares pinned raw artifacts,
+verifies available capabilities, and reports remaining work.
 
 MIT licensed.

@@ -1,11 +1,12 @@
 param(
     [string]$Go = 'go',
-    [string]$Version = '0.1.0',
-    [string]$OutputDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'dist/v0.1.0')
+    [string]$Version = '0.2.0-alpha.1',
+    [string]$OutputDir = ''
 )
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$' -or $Version.Contains('..')) { throw 'Unsafe release version.' }
 $repo = Split-Path $PSScriptRoot -Parent
+if (-not $OutputDir) { $OutputDir = Join-Path $repo "dist/v$Version" }
 $output = [IO.Path]::GetFullPath($OutputDir)
 [IO.Directory]::CreateDirectory($output) | Out-Null
 $old = @{}

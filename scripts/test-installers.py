@@ -14,6 +14,7 @@ import unittest
 
 
 SCRIPTS = Path(__file__).resolve().parent
+DEFAULT_VERSION = "v0.2.0-alpha.1"
 
 
 def shell_path(path):
@@ -101,7 +102,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(list(self.base.glob("archer-download.*")), [])
         return run
 
-    def version_binary(self, version="v0.1.0"):
+    def version_binary(self, version=DEFAULT_VERSION):
         return self.root / "versions" / version / "bin" / self.binary
 
     def test_verified_install_and_repeat(self):
@@ -109,7 +110,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(self.version_binary().read_bytes(), self.data)
         self.install()
         self.assertEqual(self.version_binary().read_bytes(), self.data)
-        self.assertEqual(sorted(p.name for p in (self.root / "versions").iterdir()), ["v0.1.0"])
+        self.assertEqual(sorted(p.name for p in (self.root / "versions").iterdir()), [DEFAULT_VERSION])
 
     def test_wrong_checksum_leaves_no_installation(self):
         self.fixture(b"corrupt fixture", wrong=True)
@@ -156,7 +157,7 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(self.root.exists())
 
     def test_unmanaged_version_directory_preserved(self):
-        version_dir = self.root / "versions" / "v0.1.0"
+        version_dir = self.root / "versions" / DEFAULT_VERSION
         version_dir.mkdir(parents=True)
         (version_dir / "mine").write_text("keep")
         self.install(ok=False)

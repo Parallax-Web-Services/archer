@@ -1,0 +1,202 @@
+name: Binary release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Pinned release tag, for example v0.2.0-alpha.1'
+        required: true
+        type: string
+      publish:
+        description: 'Publish after all checks; otherwise leave a draft'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: archer-release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release identity
+        id: release
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            tag="$DISPATCH_VERSION"
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$ ]]; then
+            echo 'Release version must be a safe pinned vMAJOR.MINOR.PATCH tag.' >&2
+            exit 1
+          fi
+          commit="$(git rev-parse HEAD)"
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            tagged="$(git rev-parse "refs/tags/$tag^{commit}")"
+            [[ "$tagged" == "$commit" ]] || { echo 'Tag points to a different commit.' >&2; exit 1; }
+          fi
+          printf 'tag=%s\nversion=%s\ncommit=%s\n' "$tag" "${tag#v}" "$commit" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: '0'
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Go tests and vet
+        shell: pwsh
+        run: |
+          go test ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Go tests failed.' }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Go vet failed.' }
+      - name: POSIX bootstrap checks
+        if: runner.os == 'Linux'
+        run: python3 scripts/test-installers.py --platform posix
+      - name: Run the Windows binary without Go on PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          $binary = Join-Path $env:RUNNER_TEMP 'archer-release-smoke.exe'
+          go build -trimpath -buildvcs=false -ldflags "-X main.version=$env:RELEASE_VERSION" -o $binary ./cmd/archer
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows binary build failed.' }
+          $previousPath = $env:PATH
+          try {
+            $env:PATH = "$env:WINDIR\System32;$env:WINDIR"
+            if (Get-Command go -ErrorAction SilentlyContinue) { throw 'Go must be absent from the standalone smoke PATH.' }
+            $output = & $binary version
+            if ($LASTEXITCODE -ne 0 -or $output -ne "Archer $env:RELEASE_VERSION") { throw 'Standalone Windows binary failed.' }
+          } finally { $env:PATH = $previousPath }
+      - name: Windows bootstrap checks
+        if: runner.os == 'Windows'
+        run: python scripts/test-installers.py --platform windows
+      - name: PHP bridge checks when PHP is available
+        shell: pwsh
+        run: |
+          if (Get-Command php -ErrorAction SilentlyContinue) {
+            php scripts/test-slipstream-bridge.php
+            if ($LASTEXITCODE -ne 0) { throw 'PHP bridge checks failed.' }
+          } else {
+            Write-Output 'PHP is unavailable on this runner; PHP integration tests skip explicitly.'
+          }
+
+  build:
+    needs: [source, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Package six native binaries and bootstrap files
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.source.outputs.commit }}
+        run: |
+          git diff --quiet HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Release checkout changed.' }
+          ./scripts/package-release.ps1 -Version $env:RELEASE_VERSION -SourceCommit $env:RELEASE_COMMIT -SourceTree clean -OutputDir dist/release
+      - name: Run the Linux binary without Go on PATH
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          binary="$(pwd)/dist/release/archer_linux_amd64"
+          output="$(env -i PATH=/archer-no-toolchain "$binary" version)"
+          [[ "$output" == "Archer $RELEASE_VERSION" ]]
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: archer-release
+          path: dist/release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    needs: [source, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: archer-release
+          path: dist/release
+      - name: Create an immutable release with verified assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.source.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.source.outputs.commit }}
+          PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+        run: |
+          set -euo pipefail
+          cd dist/release
+          expected=(archer_linux_amd64 archer_linux_arm64 archer_darwin_amd64 archer_darwin_arm64 archer_windows_amd64.exe archer_windows_arm64.exe install.sh install.ps1 archer.1 MANPAGE.md README.md LICENSE BUILDINFO.json SHA256SUMS)
+          printf '%s\n' "${expected[@]}" | LC_ALL=C sort > "$RUNNER_TEMP/archer-expected-assets"
+          find . -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort > "$RUNNER_TEMP/archer-actual-assets"
+          diff -u "$RUNNER_TEMP/archer-expected-assets" "$RUNNER_TEMP/archer-actual-assets"
+          [[ "$(find . -mindepth 1 -maxdepth 1 | wc -l)" -eq "${#expected[@]}" ]]
+          sha256sum --strict --check SHA256SUMS
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; existing assets are immutable.' >&2
+            exit 1
+          fi
+          # Create the tag only when manual dispatch names a new version.
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/archer-tag.json" 2>/dev/null; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SOURCE_COMMIT" > "$RUNNER_TEMP/archer-created-tag.json"
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/archer-tag.json"
+          fi
+          kind="$(jq -r '.object.type' "$RUNNER_TEMP/archer-tag.json")"
+          commit="$(jq -r '.object.sha' "$RUNNER_TEMP/archer-tag.json")"
+          for attempt in 1 2 3 4 5; do
+            [[ "$kind" == tag ]] || break
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/$commit" > "$RUNNER_TEMP/archer-tag.json"
+            kind="$(jq -r '.object.type' "$RUNNER_TEMP/archer-tag.json")"
+            commit="$(jq -r '.object.sha' "$RUNNER_TEMP/archer-tag.json")"
+          done
+          [[ "$kind" == commit && "$commit" == "$SOURCE_COMMIT" ]] || { echo 'Release tag no longer points to the tested source.' >&2; exit 1; }
+          printf 'Prebuilt Archer binaries for Linux, macOS, and Windows (amd64/arm64). Go is only needed when building Archer from source.\n\nSource commit: `%s`. Check `SHA256SUMS` before installation. `BUILDINFO.json` records the toolchain and build targets.\n' "$SOURCE_COMMIT" > "$RUNNER_TEMP/archer-release-notes.md"
+          args=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Archer $TAG" --notes-file "$RUNNER_TEMP/archer-release-notes.md")
+          [[ "$PUBLISH" == true ]] || args+=(--draft)
+          [[ "$TAG" != *-* ]] || args+=(--prerelease)
+          gh "${args[@]}" "${expected[@]}"

@@ -69,6 +69,8 @@ That is a target scenario. Current source can replay supported npm v3 and Compos
 
 The source boundaries are small and explicit: [CLI](../cmd/archer/main.go), [project and plan types](../internal/archer/model.go), [selection and installation](../internal/archer/engine.go), [context](../internal/archer/context.go), [catalogs](../internal/catalog/catalog.go), and [artifact store](../internal/store/store.go). The Go module has no third-party dependencies. This keeps bootstrap independent of PHP and Node; it does not make their package ecosystems trivial to implement.
 
+Go is an implementation and development dependency, not an end-user prerequisite. Installation distributes a standalone prebuilt executable, and normal Archer commands do not locate or invoke the Go toolchain. Building from source remains an optional path. PHP, Node, extensions, and native build tools belong to the selected application's runtime or build requirements; Archer must discover or prepare those separately.
+
 ## Target architecture
 
 The core remains deterministic. Ecosystem-specific adapters supply discovery, compatibility, execution, and verification behind a shared plan. The diagram describes the target architecture. Native handoffs and initial npm/Composer replay backends exist; full package compatibility, runtimes, deployment, result caching, and callback orchestration remain pending.
@@ -200,9 +202,9 @@ General version solving, alternative repository types, broad plugin support, and
 
 ## Distribution and release trust
 
-The initial distribution is a per-user, versioned bootstrap in the nvm and Composer style. POSIX and PowerShell scripts choose the platform artifact, verify its SHA-256 against the release manifest, retain versioned installations, and provide a launcher and PATH instruction. Package-manager listings can follow once this path is stable.
+The initial distribution is a per-user, versioned bootstrap in the nvm and Composer style. POSIX and PowerShell scripts choose a prebuilt platform artifact, verify its SHA-256 against the release manifest, retain versioned installations, and provide a launcher and PATH instruction. This path requires no Go toolchain. Go is needed only for optional source builds and development. Package-manager listings can follow once this path is stable.
 
-Today, six raw binaries and `SHA256SUMS` can be produced locally. The bootstrap's GitHub release URL becomes usable only after those assets are published. Source pushed to GitHub is not an installable remote release. The current scripts avoid elevated privilege and shell startup edits and preserve unmanaged conflicting paths.
+The [v0.2.0-alpha.1 prerelease](https://github.com/Parallax-Web-Services/archer/releases/tag/v0.2.0-alpha.1) distributes six raw binaries and `SHA256SUMS` through a tagged release workflow. The bootstrap obtains the selected artifact from that release or accepts a prepared local release directory through `ARCHER_DIST_DIR`; both paths avoid requiring the user to compile Archer. Windows/amd64 and Linux/amd64 have native execution checks. Darwin and arm64 artifacts are cross-built, which does not establish native application support. The current scripts avoid elevated privilege and shell startup edits and preserve unmanaged conflicting paths.
 
 Checksums establish consistency with the manifest. Release trust also needs signed publisher metadata, immutable release policy, a reproducible build record, supported upgrade/rollback behavior, and native validation for claimed platforms. Those are release gates, not properties established by hashing an asset downloaded alongside its manifest.
 

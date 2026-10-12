@@ -1,15 +1,14 @@
 # Archer worker protocol
 
-The Go CLI now has a native project adapter for Slipstream's Parallax envelopes. It advertises configured capabilities, resolves requests, executes approved raw-artifact installations, and returns evidence-backed results. This is the first integration slice. PHP `archer/v1` installer manifests and dependency graphs are not imported by this adapter.
+The Archer CLI has a native project adapter for Slipstream's Parallax envelopes. It advertises configured capabilities, resolves requests, executes approved raw-artifact installations, and returns evidence-backed results. This is the first integration slice. PHP `archer/v1` installer manifests and dependency graphs are not imported by this adapter.
 
-Build current source before using these commands; the local `dist/v0.1.0` artifacts predate the adapter.
+[Install the standalone executable](../README.md#install-archer), then use these commands. No Go toolchain is required.
 
 ```sh
-go build -trimpath -buildvcs=false -o dist/archer ./cmd/archer
-./dist/archer capabilities --json --project /path/to/project
-./dist/archer resolve --json --stdin --project /path/to/project < request.json
-./dist/archer install --preflight --json --stdin --project /path/to/project < handoff.json
-./dist/archer install --json --stdin --project /path/to/project < handoff.json
+archer capabilities --json --project /path/to/project
+archer resolve --json --stdin --project /path/to/project < request.json
+archer install --preflight --json --stdin --project /path/to/project < handoff.json
+archer install --json --stdin --project /path/to/project < handoff.json
 ```
 
 ## Resolution and approval
@@ -70,7 +69,7 @@ Explicit `delivery: local` allows a local pinned executable without a service ca
 
 ## Slipstream transport
 
-The existing `ArcherProvider` prefixes its configured binary with `PHP_BINARY`. Point that binary to `scripts/slipstream-archer.php`, set `ARCHER_BINARY` to the absolute Go executable, and select a working directory containing the native project configuration. The bridge forwards argument arrays and standard streams and preserves exit codes. It installs nothing and constructs no shell command.
+The existing `ArcherProvider` prefixes its configured binary with `PHP_BINARY`. Point that binary to `scripts/slipstream-archer.php`, set `ARCHER_BINARY` to the absolute Archer executable, and select a working directory containing the native project configuration. The bridge forwards argument arrays and standard streams and preserves exit codes. It installs nothing and constructs no shell command. This transport uses Slipstream's PHP runtime; the Archer executable itself requires no PHP or Go runtime.
 
 Slipstream is not changed automatically. Its PHP manifest registry and the Go project registry remain different backends. Migration needs matching server/worker project configuration and deliberate provider selection.
 

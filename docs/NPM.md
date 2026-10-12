@@ -1,13 +1,12 @@
 # Frozen npm replay
 
-Archer can materialize the exact registry archive tree recorded in a version 3 `package-lock.json`. This is the first package installation backend. It uses Go directly and does not invoke npm, Composer, a shell, or package lifecycle code.
+Archer can materialize the exact registry archive tree recorded in a version 3 `package-lock.json`. This is the first package installation backend. Archer prepares the tree directly without invoking npm, Composer, a shell, or package lifecycle code. [Install the standalone executable](../README.md#install-archer); using it needs no Go toolchain.
 
 ```sh
-go build -trimpath -buildvcs=false -o dist/archer ./cmd/archer
-dist/archer init --project /path/to/project
-dist/archer plan npm:react --project /path/to/project --json
-dist/archer i npm:react --project /path/to/project --json
-dist/archer i npm:react --project /path/to/project --offline --json
+archer init --project /path/to/project
+archer plan npm:react --project /path/to/project --json
+archer i npm:react --project /path/to/project --json
+archer i npm:react --project /path/to/project --offline --json
 ```
 
 Replace `npm:react` with a direct declaration in that project's `package.json`. Selecting any supported npm requirement replays the **whole locked tree**, including development dependencies, nested placements, and supported optional packages. It does not install just that selector. Selecting npm requirements leaves Composer requirements outside the invocation; a full `archer i` evaluates both supported backends under the project's source and runtime policy.

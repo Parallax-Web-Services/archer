@@ -16,7 +16,7 @@ import (
 	"github.com/Parallax-Web-Services/archer/internal/worker"
 )
 
-var version = "0.1.0-dev"
+var version = "0.2.0-dev"
 
 type options struct {
 	command, project, home, approval      string

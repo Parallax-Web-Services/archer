@@ -1,9 +1,8 @@
 # ARCHER 1
 
-Archer 0.1.0-dev. User Commands. 11 October 2026.
+Archer 0.2.0-alpha.1. User Commands. 12 October 2026.
 
-This reference includes unreleased protocol and package extensions in the current source.
-The existing local v0.1.0 release binaries predate those extensions.
+This reference covers the v0.2.0-alpha.1 prerelease, including native worker protocol and frozen npm/Composer replay.
 
 ## NAME
 
@@ -35,6 +34,8 @@ Archer prepares project capabilities by checking existing services and local sof
 For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Missing, stale, or unavailable configured discovery blocks unrestricted fallback. Use `delivery: local` for an explicitly local-only artifact requirement.
 
 This version installs individual raw executable artifacts and replays supported npm v3 and Composer locks. Non-package version constraints remain unresolved. It makes no model calls. Worker mode returns Parallax handoff results; the caller owns transport, task claims, and callbacks.
+
+The prebuilt Archer executable requires no Go toolchain. Go is optional and needed only when compiling or developing Archer from source. Application runtime requirements remain separate: Composer replay verifies PHP and its extensions, and application execution requires compatible PHP or Node as declared by the project.
 
 ## COMMANDS
 
@@ -180,7 +181,7 @@ Local `services[].token_env` bindings name their own environment variables. A mi
 
 ### Bootstrap variables
 
-The bootstrap scripts additionally use `ARCHER_VERSION` for the pinned release tag, defaulting to `v0.1.0`, and `ARCHER_DIST_DIR` for a local release directory. These variables do not change CLI version or project recipe selection. Remote bootstrap requires published release assets; none have been published for this baseline.
+The bootstrap scripts additionally use `ARCHER_VERSION` for the pinned release tag, defaulting to `v0.2.0-alpha.1`, and `ARCHER_DIST_DIR` for a local release directory. These variables do not change CLI version or project recipe selection. Without a local directory, bootstrap obtains the selected binary and checksum manifest from the tagged GitHub release. Neither path requires a Go toolchain.
 
 ## FILES
 
