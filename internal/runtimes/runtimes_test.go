@@ -67,6 +67,36 @@ func fixture(t *testing.T, version string) (string, []byte) {
 	}
 	return file, data
 }
+
+// appendExecutable changes an executable that a probe may have just run. It
+// replaces the file rather than writing in place: Linux can briefly refuse
+// writes to a recently executed image, and Windows scanners can hold it open.
+func appendExecutable(t *testing.T, path string, trailer []byte) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := path + ".changed"
+	if err := os.WriteFile(replacement, append(data, trailer...), info.Mode().Perm()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		err = os.Rename(replacement, path)
+		if err == nil || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 func rawSpec(t *testing.T, kind string) Spec {
 	t.Helper()
 	file, _ := fixture(t, "1.2.3")
@@ -112,15 +142,7 @@ func TestLocalRuntimeExactVersionFreshEvidenceAndExclusion(t *testing.T) {
 		t.Fatalf("excluded = %#v, %v", excluded, err)
 	}
 	opts.ExcludeLocal = false
-	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.Write([]byte("changed"))
-	f.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	appendExecutable(t, file, []byte("changed"))
 	if _, err := Install(context.Background(), p, opts); err == nil {
 		t.Fatal("accepted changed frozen local evidence")
 	}
@@ -172,15 +194,7 @@ func TestManagedOfflineReuseAndScopeIsolation(t *testing.T) {
 }
 func TestModifiedManagedTreeAndEditedReceiptArePreserved(t *testing.T) {
 	p, spec, opts := installFixture(t, "node")
-	f, err := os.OpenFile(p.Path, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.Write([]byte("modified"))
-	f.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	appendExecutable(t, p.Path, []byte("modified"))
 	root := filepath.Dir(filepath.Dir(p.Path))
 	receiptFile := filepath.Join(root, receiptName)
 	data, err := os.ReadFile(receiptFile)
@@ -343,12 +357,7 @@ func TestVerifySelectionRechecksLocalAndManagedEvidence(t *testing.T) {
 	if err := VerifySelection(context.Background(), changed, localOpts); err == nil {
 		t.Fatal("accepted changed frozen runtime environment")
 	}
-	f, err := os.OpenFile(local, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = f.Write([]byte("changed"))
-	f.Close()
+	appendExecutable(t, local, []byte("changed"))
 	if err := VerifySelection(context.Background(), p, localOpts); err == nil {
 		t.Fatal("accepted changed local executable evidence")
 	}
