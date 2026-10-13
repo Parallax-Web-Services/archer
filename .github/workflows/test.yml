@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: '0'
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Go tests and vet
+        shell: pwsh
+        run: |
+          # Failing lines become annotations, which remain readable without
+          # signing in to download the job log.
+          function Report($label, $lines) {
+            $lines | Where-Object { $_ -match '--- FAIL|_test\.go:\d+|\.go:\d+:\d+|panic|^FAIL|timed out' } |
+              Select-Object -First 40 |
+              ForEach-Object { "::error title=$label::" + ("$_" -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A') }
+          }
+          $output = go test -count=1 ./... 2>&1
+          $testExit = $LASTEXITCODE
+          $output
+          if ($testExit -ne 0) { Report 'go test' $output; throw 'Go tests failed.' }
+          $output = go vet ./... 2>&1
+          $vetExit = $LASTEXITCODE
+          $output
+          if ($vetExit -ne 0) { Report 'go vet' $output; throw 'Go vet failed.' }

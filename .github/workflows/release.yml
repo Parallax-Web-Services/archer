@@ -78,10 +78,21 @@ jobs:
       - name: Go tests and vet
         shell: pwsh
         run: |
-          go test ./...
-          if ($LASTEXITCODE -ne 0) { throw 'Go tests failed.' }
-          go vet ./...
-          if ($LASTEXITCODE -ne 0) { throw 'Go vet failed.' }
+          # Failing lines become annotations, which remain readable without
+          # signing in to download the job log.
+          function Report($label, $lines) {
+            $lines | Where-Object { $_ -match '--- FAIL|_test\.go:\d+|\.go:\d+:\d+|panic|^FAIL|timed out' } |
+              Select-Object -First 40 |
+              ForEach-Object { "::error title=$label::" + ("$_" -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A') }
+          }
+          $output = go test -count=1 ./... 2>&1
+          $testExit = $LASTEXITCODE
+          $output
+          if ($testExit -ne 0) { Report 'go test' $output; throw 'Go tests failed.' }
+          $output = go vet ./... 2>&1
+          $vetExit = $LASTEXITCODE
+          $output
+          if ($vetExit -ne 0) { Report 'go vet' $output; throw 'Go vet failed.' }
       - name: POSIX bootstrap checks
         if: runner.os == 'Linux'
         run: python3 scripts/test-installers.py --platform posix
