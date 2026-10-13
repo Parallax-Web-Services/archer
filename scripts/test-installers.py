@@ -14,7 +14,7 @@ import unittest
 
 
 SCRIPTS = Path(__file__).resolve().parent
-DEFAULT_VERSION = "v0.3.0-alpha.2"
+DEFAULT_VERSION = "v0.3.0-alpha.3"
 
 
 def shell_path(path):

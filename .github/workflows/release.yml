@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Pinned release tag, for example v0.3.0-alpha.2'
+        description: 'Pinned release tag, for example v0.3.0-alpha.3'
         required: true
         type: string
       publish:

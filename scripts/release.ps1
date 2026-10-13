@@ -1,6 +1,6 @@
 param(
     [string]$Go = 'go',
-    [string]$Version = '0.3.0-alpha.2',
+    [string]$Version = '0.3.0-alpha.3',
     [string]$OutputDir = ''
 )
 $ErrorActionPreference = 'Stop'
