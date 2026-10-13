@@ -4,8 +4,8 @@ set -eu
 umask 077
 
 die() { printf '%s\n' "archer: $*" >&2; exit 1; }
-version=${ARCHER_VERSION:-v0.3.0-alpha.3}
-printf '%s\n' "$version" | awk '/^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/ {ok=1} END {exit !ok}' || die 'ARCHER_VERSION must be pinned, for example v0.3.0-alpha.3'
+version=${ARCHER_VERSION:-v0.3.0-alpha.4}
+printf '%s\n' "$version" | awk '/^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/ {ok=1} END {exit !ok}' || die 'ARCHER_VERSION must be pinned, for example v0.3.0-alpha.4'
 case "$version" in *[!A-Za-z0-9.-]*|*..*|*.) die 'unsafe ARCHER_VERSION' ;; esac
 case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) die 'supported systems: Linux and macOS' ;; esac
 case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) die 'supported architectures: amd64 and arm64' ;; esac
