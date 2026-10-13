@@ -490,7 +490,9 @@ func localPlan(ctx context.Context, p Plan, opts Options) (Plan, error) {
 	return p, nil
 }
 func probe(ctx context.Context, kind, binary, version string, environment map[string]string) error {
-	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// A cold interpreter start can be slow on busy hosts, particularly while
+	// Windows scans a newly seen executable.
+	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	args := []string{"--version"}
 	if kind == "php" {
@@ -509,6 +511,9 @@ func probe(ctx context.Context, kind, binary, version string, environment map[st
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	if err := cmd.Run(); err != nil {
+		if errors.Is(bounded.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("%s runtime version probe timed out after 30s", kind)
+		}
 		return fmt.Errorf("%s runtime version probe failed: %w", kind, err)
 	}
 	found := strings.TrimSpace(out.String())

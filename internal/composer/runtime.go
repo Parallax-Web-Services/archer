@@ -3,6 +3,7 @@ package composer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,7 +45,9 @@ func ProbeRuntimeWithEnv(ctx context.Context, binary string, environment []strin
 	if err != nil || !info.Mode().IsRegular() {
 		return RuntimeInfo{}, fmt.Errorf("PHP runtime must be a regular executable")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// A cold interpreter start can be slow on busy hosts, particularly while
+	// Windows scans a newly seen executable.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, resolved, "-d", "display_errors=stderr", "-d", "log_errors=0", "-r", runtimeProbePHP)
 	if environment != nil {
@@ -53,6 +56,9 @@ func ProbeRuntimeWithEnv(ctx context.Context, binary string, environment []strin
 	var output, diagnostics probeBuffer
 	command.Stdout, command.Stderr = &output, &diagnostics
 	if err := command.Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return RuntimeInfo{}, fmt.Errorf("PHP runtime probe timed out after 30s")
+		}
 		return RuntimeInfo{}, fmt.Errorf("PHP runtime probe failed: %w: %s", err, strings.TrimSpace(diagnostics.String()))
 	}
 	if output.overflow {
