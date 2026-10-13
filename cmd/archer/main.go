@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/Parallax-Web-Services/archer/internal/archer"
@@ -121,7 +120,7 @@ func runWithInput(args []string, in io.Reader, out, errout io.Writer) int {
 	case "help":
 		fmt.Fprint(out, `Archer — straight & steady.
 Usage:
-  archer init                         inspect project package manifests and create archer.json
+  archer init                         write an optional archer.json from package manifests
   archer plan [capability ...]         verify service/local reuse and explain remaining work
   archer i [capability ...]            replay locked PHP/npm packages or install pinned artifacts
   archer i --plan                      inspect without downloading or installing artifacts
@@ -134,6 +133,8 @@ Usage:
   archer version
 Options: --project DIR --home DIR --json --offline --approval PLAN_ID --plan
 Worker options: --stdin --preflight (native archer.project/v1 recipes only)
+Without archer.json, requirements come from composer.json and package.json and
+Archer settings from ARCHER_* variables in the environment, .env or .env.example.
 No command invokes a model. Unknown work is returned explicitly.
 `)
 		return 0
@@ -332,49 +333,11 @@ func initialize(dir string, out io.Writer) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	project := archer.Project{Schema: "archer.project/v1", Scope: filepath.Base(dir), Requirements: []archer.Requirement{}}
-	seen := map[string]bool{}
-	for _, source := range []struct {
-		file, prefix string
-		keys         []string
-	}{
-		{"composer.json", "composer:", []string{"require", "require-dev"}},
-		{"package.json", "npm:", []string{"dependencies", "devDependencies", "optionalDependencies"}},
-	} {
-		b, err := os.ReadFile(filepath.Join(dir, source.file))
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		var manifest map[string]json.RawMessage
-		if err := json.Unmarshal(b, &manifest); err != nil {
-			return fmt.Errorf("%s: %w", source.file, err)
-		}
-		for _, key := range source.keys {
-			var packages map[string]string
-			if manifest[key] == nil {
-				continue
-			}
-			if err := json.Unmarshal(manifest[key], &packages); err != nil {
-				return fmt.Errorf("%s %s: %w", source.file, key, err)
-			}
-			names := []string{}
-			for name := range packages {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			for _, name := range names {
-				cap := source.prefix + name
-				if seen[cap] {
-					continue
-				}
-				seen[cap] = true
-				project.Requirements = append(project.Requirements, archer.Requirement{Capability: cap, Delivery: "package", Constraint: packages[name]})
-			}
-		}
+	requirements, err := archer.ManifestRequirements(dir)
+	if err != nil {
+		return err
 	}
+	project := archer.Project{Schema: "archer.project/v1", Scope: filepath.Base(dir), Requirements: requirements}
 	b, err := json.MarshalIndent(project, "", "  ")
 	if err != nil {
 		return err

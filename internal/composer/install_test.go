@@ -446,3 +446,68 @@ func TestChecksumPolicySupportsKnownGitHubWithoutHostList(t *testing.T) {
 		t.Fatal("arbitrary archive host accepted")
 	}
 }
+
+func installGitLabFixture(t *testing.T, endpoint string) (string, *Plan) {
+	t.Helper()
+	root := t.TempDir()
+	u, _ := url.Parse(endpoint)
+	manifest := map[string]any{"name": "fixture/application", "require": map[string]string{"fixture/package": "dev-main"}, "repositories": []any{map[string]string{"type": "vcs", "url": "https://" + u.Hostname() + "/fixture/package.git"}}}
+	manifestData, _ := json.Marshal(manifest)
+	contentHash, err := ContentHash(manifestData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock := map[string]any{"content-hash": contentHash, "packages": []any{map[string]any{
+		"name": "fixture/package", "version": "dev-main", "default-branch": true, "type": "library",
+		"dist":     map[string]string{"type": "zip", "url": endpoint + "/api/v4/projects/fixture%2Fpackage/repository/archive.zip?sha=" + fixtureReference, "reference": fixtureReference, "shasum": ""},
+		"autoload": map[string]any{"psr-4": map[string]string{"Fixture\\": "src/"}},
+	}}, "packages-dev": []any{}, "aliases": []any{}, "stability-flags": map[string]any{"fixture/package": 20}, "platform": map[string]any{}, "platform-dev": map[string]any{}}
+	lockData, _ := json.Marshal(lock)
+	for name, data := range map[string][]byte{"composer.json": manifestData, "composer.lock": lockData} {
+		if err := os.WriteFile(filepath.Join(root, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan, err := Load(root, SourcePolicy{Mode: "source-reference", TrustedHosts: []string{u.Hostname()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, plan
+}
+
+func TestInstallGitLabBranchArchive(t *testing.T) {
+	var calls atomic.Int32
+	server := installServer(t, installZIP(t, "fixture/package"), &calls)
+	defer server.Close()
+	root, plan := installGitLabFixture(t, server.URL)
+	home := t.TempDir()
+	report, err := Install(context.Background(), root, plan, Options{Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := os.ReadFile(filepath.Join(report.Path, "composer", "installed.php"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(installed), "'dev-main'") || !strings.Contains(string(installed), "'9999999-dev'") {
+		t.Fatalf("branch metadata missing from installed.php:\n%s", installed)
+	}
+	fresh, freshPlan := installGitLabFixture(t, server.URL)
+	if report, err := Install(context.Background(), fresh, freshPlan, Options{Home: home, Offline: true}); err != nil || report.Cached != 1 || calls.Load() != 1 {
+		t.Fatalf("offline GitLab replay: %+v calls=%d err=%v", report, calls.Load(), err)
+	}
+}
+
+func TestInstallRejectsGitLabRedirectToDifferentProjectOrCommit(t *testing.T) {
+	for _, target := range []string{"/api/v4/projects/other%2Fpackage/repository/archive.zip?sha=" + fixtureReference, "/api/v4/projects/fixture%2Fpackage/repository/archive.zip?sha=" + strings.Repeat("a", 40), "/repos/fixture/package/zipball/" + fixtureReference} {
+		t.Run(target, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target, http.StatusFound) }))
+			defer server.Close()
+			root, plan := installGitLabFixture(t, server.URL)
+			if _, err := Install(context.Background(), root, plan, Options{Home: t.TempDir()}); err == nil {
+				t.Fatal("unsafe redirect accepted")
+			}
+			assertComposerUnpublished(t, root)
+		})
+	}
+}

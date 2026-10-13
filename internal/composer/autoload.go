@@ -534,6 +534,16 @@ func phpValue(value any) string {
 }
 
 func normalizedVersion(version string) string {
+	if strings.HasPrefix(version, "dev-") {
+		return version
+	}
+	if strings.HasSuffix(version, ".x-dev") {
+		parts := strings.Split(strings.TrimPrefix(strings.TrimSuffix(version, ".x-dev"), "v"), ".")
+		for len(parts) < 4 {
+			parts = append(parts, "9999999")
+		}
+		return strings.Join(parts, ".") + "-dev"
+	}
 	v := strings.TrimPrefix(version, "v")
 	r := regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?(.*)$`)
 	m := r.FindStringSubmatch(v)
@@ -554,8 +564,15 @@ func installedMetadata(plan *Plan) (map[string]any, map[string]any) {
 	packages := make([]map[string]any, 0, len(plan.Packages))
 	devNames := []string{}
 	for _, pkg := range plan.Packages {
-		versions[pkg.Name] = map[string]any{"pretty_version": pkg.Version, "version": normalizedVersion(pkg.Version), "reference": pkg.Reference, "type": pkg.Type, "install_path": phpExpression("__DIR__ . " + phpQuote("/../"+pkg.Name)), "aliases": []string{}, "dev_requirement": pkg.Dev}
+		aliases := []string{}
+		if pkg.DefaultBranch {
+			aliases = append(aliases, "9999999-dev")
+		}
+		versions[pkg.Name] = map[string]any{"pretty_version": pkg.Version, "version": normalizedVersion(pkg.Version), "reference": pkg.Reference, "type": pkg.Type, "install_path": phpExpression("__DIR__ . " + phpQuote("/../"+pkg.Name)), "aliases": aliases, "dev_requirement": pkg.Dev}
 		p := map[string]any{"name": pkg.Name, "version": pkg.Version, "version_normalized": normalizedVersion(pkg.Version), "type": pkg.Type, "install-path": "../" + pkg.Name, "installation-source": "dist", "require": pkg.Require, "extra": pkg.Extra}
+		if pkg.DefaultBranch {
+			p["default-branch"] = true
+		}
 		packages = append(packages, p)
 		if pkg.Dev {
 			devNames = append(devNames, pkg.Name)

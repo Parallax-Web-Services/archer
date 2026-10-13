@@ -26,7 +26,14 @@ The default `checksum` policy requires every package distribution to supply a va
 }
 ```
 
-This is the `composer` portion of `archer.json`; retain the rest of the project's configuration. Set `composer.php` for a particular local interpreter or declare `runtimes.php` for an exact runtime pin and bundle policy. If both `composer.php` and `runtimes.php.binary` are supplied, they must select the same interpreter. Source-reference mode requires immutable 40-digit commit references and archive URLs that identify their repository and commit. Configured hosts must be explicit. When both GitHub hosts are trusted, Archer derives the corresponding immutable codeload route from an API archive URL, preserving the repository and commit while avoiding an API request for every package. Redirects must preserve that identity and remain inside the chosen source policy.
+This is the `composer` portion of `archer.json`; retain the rest of the project's configuration. A project without `archer.json` declares the same policy with Laravel-style environment keys, typically committed in `.env.example` and overridable in `.env` or the process environment:
+
+```sh
+ARCHER_COMPOSER_SOURCE_POLICY=source-reference
+ARCHER_COMPOSER_TRUSTED_HOSTS=api.github.com,codeload.github.com,gitlab.com
+```
+
+`ARCHER_PHP` corresponds to `composer.php`. Set `composer.php` for a particular local interpreter or declare `runtimes.php` for an exact runtime pin and bundle policy. If both `composer.php` and `runtimes.php.binary` are supplied, they must select the same interpreter. Source-reference mode requires immutable 40-digit commit references and archive URLs that identify their repository and commit. Configured hosts must be explicit. When both GitHub hosts are trusted, Archer derives the corresponding immutable codeload route from an API archive URL, preserving the repository and commit while avoiding an API request for every package. Redirects must preserve that identity and remain inside the chosen source policy.
 
 Each source identity receives an archive and a receipt published together in a private cache directory. The receipt binds the original distribution URL, any declared Git source URL, effective download URL, commit reference, any lock checksum, byte count, and the SHA-256 of the first downloaded bytes. A declared Git source must identify the same repository and commit as the distribution. Subsequent uses rehash the archive and compare that receipt. Archer preserves a corrupt or incomplete cache entry and reports an error instead of silently downloading replacement bytes.
 
@@ -46,7 +53,13 @@ An unmanaged tree, modified file, changed lock, or unsupported profile produces 
 
 The current backend supports frozen stable-version GitHub ZIP distributions for library and project package types, PSR-4 and PSR-0 loading, classmaps, file autoloading, installed-package metadata, and PHP binary proxies. The runtime must satisfy the PHP and extension requirements of the complete locked graph. Package requirements retain their recorded resolution; Archer does not run a dependency solver.
 
-Custom repositories, Composer plugins, package scripts, metapackages, non-PHP executable proxies, custom vendor or binary directories, platform overrides, and partial production-only installs are outside this profile. Root classmaps that scan the whole project, vendor, or Archer's private staging directories are rejected because their output would depend on installation state. Run explicit application checks through `archer run -- php ...`; it verifies declared runtime and frozen graph readiness, obtains no artifacts, and preserves the child exit code. It does not run package scripts or claim application readiness by itself.
+## VCS repositories and branch versions
+
+Root `repositories` entries of type `vcs`, `git`, `github`, or `gitlab` with an exact HTTPS repository URL are accepted; their URLs contribute to the content hash as Composer computes it. A locked package whose archive is not on GitHub must come from one of those declared repositories, and its Git source must name the same repository. GitLab archives use the API form `https://HOST/api/v4/projects/NAMESPACE%2FPROJECT/repository/archive.zip?sha=COMMIT`, whose query must pin exactly the locked 40-digit commit. A GitLab host is never implicitly trusted: it must be listed in `trusted_hosts`, and redirects must keep the same host, project, and commit.
+
+Locked branch versions such as `dev-master` or `2.x-dev` are replayed at their recorded commit. A branch requirement is satisfied only by that exact branch, optionally pinned with `#COMMIT`; numeric constraints never match a branch version, and numeric conflicts against one fail closed. `default-branch` packages receive Composer's `9999999-dev` alias in runtime metadata. Lock `stability-flags` are accepted for direct requirements because they only guide solving.
+
+Other repository types (`composer`, `path`, `package`, `artifact`), repository filters, and disabling Packagist are unsupported. Composer plugins, package scripts, metapackages, non-PHP executable proxies, custom vendor or binary directories, platform overrides, and partial production-only installs are outside this profile. Root classmaps that scan the whole project, vendor, or Archer's private staging directories are rejected because their output would depend on installation state. Run explicit application checks through `archer run -- php ...`; it verifies declared runtime and frozen graph readiness, obtains no artifacts, and preserves the child exit code. It does not run package scripts or claim application readiness by itself.
 
 Managed PHP reads the bundle's declared `php_ini`, or an empty Archer-owned ini, through `PHPRC` with `PHP_INI_SCAN_DIR` empty. A selected local `php_ini` uses that environment too; local PHP without one keeps its ambient configuration. The runtime bundle must supply compatible extensions and libraries. Archer does not compile PHP extensions or install OS libraries merely because the lock requires them.
 

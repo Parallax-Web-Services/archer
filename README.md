@@ -33,7 +33,9 @@ offline replay of both dependency trees.
 [Frozen Composer replay](docs/COMPOSER.md) now prepares the locked PHP `vendor`
 tree, autoloader, runtime metadata, and PHP executable proxies in Archer.
 PHP and extensions are checked before installation. Locks without archive
-checksums require an explicit source-reference policy in `archer.json`.
+checksums require an explicit source-reference policy. Laravel projects can set it
+in `.env.example` and `.env` instead of adding `archer.json`; VCS repositories and
+branch versions from explicitly trusted GitLab hosts are supported.
 
 [Managed runtimes and project execution](docs/RUNTIMES.md) complete the next
 local preparation slice: exact PHP/Node pins, verified runtime archives,
@@ -133,6 +135,9 @@ verified bytes are published. `archer run` preserves the child command's exit co
 
 `archer init` reads Composer/npm manifests and preserves package names and version
 constraints in `archer.json`. It refuses to overwrite an existing configuration.
+The file is optional: without it, Archer reads the same manifests directly and takes
+`ARCHER_*` settings from the environment, `.env`, or `.env.example`, so a Laravel
+application keeps its existing Composer and npm configuration unchanged.
 Supported npm v3 and stable GitHub Composer locks can now be replayed directly.
 Add exact runtime pins and bundles to `archer.json` when the project needs managed
 PHP or Node; `init` does not choose runtime versions or sources. `archer i`

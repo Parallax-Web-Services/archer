@@ -26,7 +26,7 @@ archer \-\-help
 .PP
 .SH "DESCRIPTION"
 .PP
-Archer prepares project capabilities by checking existing services and local software before obtaining new artifacts. Requirements come from \fBarcher.json\fR in the selected project directory. Positional capability names replace that file's requirement list for the current invocation; they do not add to it. Matching selectors retain the declared delivery and version policy.
+Archer prepares project capabilities by checking existing services and local software before obtaining new artifacts. Requirements come from \fBarcher.json\fR in the selected project directory or, without it, from the project's Composer/npm manifests and environment (see CONFIGURATION). Positional capability names replace that requirement list for the current invocation; they do not add to it. Matching selectors retain the declared delivery and version policy.
 .PP
 For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash\-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Missing, stale, or unavailable configured discovery blocks unrestricted fallback. Use \fBdelivery: local\fR for an explicitly local\-only artifact requirement.
 .PP
@@ -97,7 +97,7 @@ Alias for \fBplan\fR. It evaluates the selected requirements rather than inspect
 .PP
 .SS "context"
 .PP
-Print project\-scoped provider bindings, context revision, and recent verified outcomes as JSON. An \fBarcher.json\fR configuration is required. No probes or catalog requests run. This command does not change context.
+Print project\-scoped provider bindings, context revision, and recent verified outcomes as JSON. No probes or catalog requests run. This command does not change context.
 .PP
 .SS "capabilities"
 .PP
@@ -174,6 +174,8 @@ Print usage. Use the standalone \fBarcher \-\-help\fR form.
 Print the executable's version. Use the standalone \fBarcher \-\-version\fR form.
 .PP
 .SH "CONFIGURATION"
+.PP
+Without \fBarcher.json\fR, Archer follows Laravel convention instead of requiring another root file. Requirements are the direct \fBrequire\fR/\fBrequire\-dev\fR and npm dependency declarations, as \fBinit\fR would record them, and Archer settings come from \fBARCHER_*\fR variables. Process environment variables take precedence over \fB.env\fR, which takes precedence over the committed \fB.env.example\fR. Recognized keys are \fBARCHER_SCOPE\fR (default: the directory name), \fBARCHER_COMPOSER_SOURCE_POLICY\fR (\fBchecksum\fR or \fBsource\-reference\fR), \fBARCHER_COMPOSER_TRUSTED_HOSTS\fR (comma\-separated hostnames), and \fBARCHER_PHP\fR (equivalent to \fBcomposer.php\fR). \fBPARALLAX_SAAS_INDEX_URL\fR is read the same way. Services, probes, recipes, and runtime pins still require \fBarcher.json\fR; when that file exists, it is used instead of \fBARCHER_*\fR project settings.
 .PP
 \fBarcher.json\fR must be one JSON object with schema \fBarcher.project/v1\fR and a nonempty \fBscope\fR. Requirements are declared in a \fBrequirements\fR array; omitted or null requirements are treated as empty. A requirement is a capability\-name string or an object containing \fBcapability\fR, optional \fBdelivery\fR, and optional \fBconstraint\fR. Delivery may be \fBservice\fR, \fBlocal\fR, or \fBpackage\fR. Declare constraints in configuration; positional arguments are capability names, not free\-form intent or version expressions.
 .PP
@@ -253,7 +255,10 @@ Paths below HOME refer to the selected Archer state directory, not the user's or
 .PP
 .nf
 PROJECT/archer.json
-    Project requirements, bindings, probes, registries, and recipes.
+    Optional project requirements, bindings, probes, registries, and recipes.
+
+PROJECT/.env, PROJECT/.env.example
+    ARCHER_* settings used when archer.json is absent.
 
 HOME/cache/sha256/PREFIX/DIGEST
     Verified artifact objects; PREFIX is the digest's first two characters.

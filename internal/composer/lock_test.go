@@ -316,3 +316,130 @@ func TestFrozenZeframComposerContract(t *testing.T) {
 		t.Fatal("PHP 8.4.0 should fail frozen Symfony requirements")
 	}
 }
+
+func lockBranchFixture(t *testing.T) (string, map[string]any, map[string]any) {
+	t.Helper()
+	dir, manifest, lock := lockTestFixture(t)
+	manifest["repositories"] = []any{map[string]any{"name": "acme-cli", "type": "vcs", "url": "https://gitlab.com/acme/cli.git"}}
+	manifest["require"].(map[string]any)["acme/cli"] = "dev-master"
+	cli := map[string]any{"name": "acme/cli", "version": "dev-master", "default-branch": true, "type": "project", "bin": []any{"cli"},
+		"source":   map[string]any{"type": "git", "url": "https://gitlab.com/acme/cli.git", "reference": lockTestReference},
+		"dist":     map[string]any{"type": "zip", "url": "https://gitlab.com/api/v4/projects/acme%2Fcli/repository/archive.zip?sha=" + lockTestReference, "reference": lockTestReference, "shasum": ""},
+		"require":  map[string]any{"php": "^8.4", "acme/library": "^1.2"},
+		"autoload": map[string]any{"psr-4": map[string]any{"App\\": "app/"}}}
+	lock["packages"] = append(lock["packages"].([]any), cli)
+	lock["stability-flags"] = map[string]any{"acme/cli": 20}
+	lockWriteFixture(t, dir, manifest, lock)
+	return dir, manifest, lock
+}
+
+func lockBranchPolicy() SourcePolicy {
+	policy := lockTestPolicy()
+	policy.TrustedHosts = append(policy.TrustedHosts, "gitlab.com")
+	return policy
+}
+
+func TestLoadVCSRepositoryBranchFromTrustedGitLab(t *testing.T) {
+	dir, _, _ := lockBranchFixture(t)
+	plan, err := Load(dir, lockBranchPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cli Package
+	for _, pkg := range plan.Packages {
+		if pkg.Name == "acme/cli" {
+			cli = pkg
+		}
+	}
+	if cli.Version != "dev-master" || !cli.DefaultBranch || len(plan.Repositories) != 1 || plan.Repositories[0] != "gitlab.com/acme/cli" {
+		t.Fatalf("unexpected branch plan: %+v %+v", cli, plan.Repositories)
+	}
+	if _, err := Load(dir, lockTestPolicy()); !errors.Is(err, ErrSourcePolicy) {
+		t.Fatalf("GitLab archive accepted without explicit trust: %v", err)
+	}
+	if _, err := Load(dir, SourcePolicy{}); err == nil {
+		t.Fatal("checksum policy accepted a GitLab archive")
+	}
+}
+
+func TestRejectUnsupportedVCSAndBranchLocks(t *testing.T) {
+	cli := func(l map[string]any) map[string]any {
+		packages := l["packages"].([]any)
+		return packages[len(packages)-1].(map[string]any)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any, map[string]any)
+	}{
+		{"undeclared-repository", func(m, l map[string]any) { delete(m, "repositories") }},
+		{"composer-repository", func(m, l map[string]any) {
+			m["repositories"] = []any{map[string]any{"type": "composer", "url": "https://gitlab.com/acme/cli.git"}}
+		}},
+		{"path-repository", func(m, l map[string]any) {
+			m["repositories"] = []any{map[string]any{"type": "path", "url": "../cli"}}
+		}},
+		{"disabled-packagist", func(m, l map[string]any) {
+			m["repositories"] = []any{map[string]any{"packagist.org": false}}
+		}},
+		{"repository-filter", func(m, l map[string]any) {
+			m["repositories"].([]any)[0].(map[string]any)["only"] = []any{"acme/cli"}
+		}},
+		{"http-repository", func(m, l map[string]any) {
+			m["repositories"].([]any)[0].(map[string]any)["url"] = "http://gitlab.com/acme/cli.git"
+		}},
+		{"other-repository", func(m, l map[string]any) {
+			m["repositories"].([]any)[0].(map[string]any)["url"] = "https://gitlab.com/acme/other.git"
+		}},
+		{"source-project-drift", func(m, l map[string]any) {
+			cli(l)["source"].(map[string]any)["url"] = "https://gitlab.com/other/cli.git"
+		}},
+		{"query-reference-drift", func(m, l map[string]any) {
+			cli(l)["dist"].(map[string]any)["url"] = "https://gitlab.com/api/v4/projects/acme%2Fcli/repository/archive.zip?sha=master"
+		}},
+		{"extra-query", func(m, l map[string]any) {
+			cli(l)["dist"].(map[string]any)["url"] = "https://gitlab.com/api/v4/projects/acme%2Fcli/repository/archive.zip?sha=" + lockTestReference + "&path=src"
+		}},
+		{"unencoded-project", func(m, l map[string]any) {
+			cli(l)["dist"].(map[string]any)["url"] = "https://gitlab.com/api/v4/projects/acme/cli/repository/archive.zip?sha=" + lockTestReference
+		}},
+		{"other-branch", func(m, l map[string]any) { m["require"].(map[string]any)["acme/cli"] = "dev-main" }},
+		{"pinned-other-commit", func(m, l map[string]any) {
+			m["require"].(map[string]any)["acme/cli"] = "dev-master#" + strings.Repeat("f", 40)
+		}},
+		{"numeric-constraint-on-branch", func(m, l map[string]any) {
+			l["packages-dev"].([]any)[0].(map[string]any)["require"].(map[string]any)["acme/cli"] = "^1.0"
+		}},
+		{"numeric-conflict-on-branch", func(m, l map[string]any) {
+			l["packages-dev"].([]any)[0].(map[string]any)["conflict"] = map[string]any{"acme/cli": "<2.0"}
+		}},
+		{"branch-conflict", func(m, l map[string]any) {
+			l["packages-dev"].([]any)[0].(map[string]any)["conflict"] = map[string]any{"acme/cli": "dev-master"}
+		}},
+		{"undeclared-stability-flag", func(m, l map[string]any) { l["stability-flags"] = map[string]any{"other/package": 20} }},
+		{"invalid-stability-flag", func(m, l map[string]any) { l["stability-flags"] = map[string]any{"acme/cli": 7} }},
+		{"stable-default-branch", func(m, l map[string]any) { cli(l)["version"] = "1.0.0" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir, m, l := lockBranchFixture(t)
+			test.mutate(m, l)
+			lockWriteFixture(t, dir, m, l)
+			if _, err := Load(dir, lockBranchPolicy()); err == nil {
+				t.Fatal("accepted unsupported VCS or branch lock")
+			}
+		})
+	}
+}
+
+func TestBranchConstraintsAndNormalizedVersions(t *testing.T) {
+	pkg := Package{Version: "dev-master", Reference: lockTestReference}
+	for constraint, want := range map[string]bool{"dev-master": true, "dev-master@dev": true, "dev-master#" + lockTestReference: true, "dev-main": false, "^1.0": false} {
+		if got := branchSatisfies(pkg, constraint); got != want {
+			t.Fatalf("%s: got %v", constraint, got)
+		}
+	}
+	for version, want := range map[string]string{"dev-master": "dev-master", "2.x-dev": "2.9999999.9999999.9999999-dev", "v1.3.x-dev": "1.3.9999999.9999999-dev", "v1.2": "1.2.0.0"} {
+		if got := normalizedVersion(version); got != want {
+			t.Fatalf("%s normalized to %s", version, got)
+		}
+	}
+}

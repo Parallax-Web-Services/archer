@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/Parallax-Web-Services/archer/internal/catalog"
 	"github.com/Parallax-Web-Services/archer/internal/runtimes"
@@ -41,11 +42,19 @@ func Load(projectDir, home string, offline bool) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	var p Project
-	if err := readJSON(filepath.Join(abs, "archer.json"), &p); err != nil {
-		return nil, fmt.Errorf("read archer.json: %w (run archer init first)", err)
+	env, err := LoadEnvironment(abs)
+	if err != nil {
+		return nil, err
 	}
-	if source := os.Getenv("PARALLAX_SAAS_INDEX_URL"); source != "" && !provides(p.Registries, source) {
+	var p Project
+	if err := readJSON(filepath.Join(abs, "archer.json"), &p); errors.Is(err, os.ErrNotExist) {
+		if p, err = ProjectFromEnvironment(abs, env); err != nil {
+			return nil, err
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("read archer.json: %w", err)
+	}
+	if source := env.Get("PARALLAX_SAAS_INDEX_URL"); source != "" && !provides(p.Registries, source) {
 		p.Registries = append(p.Registries, source)
 	}
 	return New(p, abs, home, offline)

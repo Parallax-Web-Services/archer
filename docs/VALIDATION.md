@@ -152,3 +152,18 @@ PHPUnit reported `OK (47 tests, 333 assertions)` on PHP 8.5.8. Tests used an eph
 All nine Go packages passed native Windows and Linux tests; Go vet passed. The 18 Windows/POSIX bootstrap checks, nine native Linux bootstrap checks, and ten Linux PHP bridge checks also passed. Runtime checks cover exact version pins, full Composer PHP/extension requirements, all selected npm Node engine constraints, bounded archive extraction, link safety, source drift, local and managed evidence, post-probe integrity, offline reuse, and approval stability after runtime preparation. Execution checks cover literal argument forwarding, standard streams, project working directory, runtime environment, selected executable precedence, and child exit codes. Runtime effects remain local-CLI-only; the Parallax worker rejects unsupported runtime requests before planning or installation.
 
 This completes the explicit runtime-bundle and project-command slice for the frozen fixture. Curated portable runtime distributions, OS-library provisioning, automatic build/readiness orchestration, and functional Parallax service readiness remain further acceptance gates.
+
+## Current Zefram without archer.json
+
+Zefram [2c48250](https://github.com/Parallax-Web-Services/zefram/commit/2c482504) now depends on `parallax/cli` from a GitLab VCS repository at `dev-master`. The fixture was a fresh `git archive` of that commit with no `archer.json`. Its `.env.example` declared the source-reference policy and trusted `api.github.com`, `codeload.github.com` and `gitlab.com`. Archer derived requirements from `composer.json`/`package.json` and settings from those `ARCHER_*` variables. The home directory started empty.
+
+| Run | PHP packages | npm placements | Package archive downloads | Elapsed |
+| --- | ---: | ---: | --- | ---: |
+| Fresh project and cache | 121 | 112 | 121 PHP + 107 npm | 9.3 s |
+| Same project, offline | 121 | 112 | 0 | 5.8 s |
+
+Planning returned exit 2 for pending work. The approved installation and offline replay returned exit 0 with no remaining requirements and no model calls. No runtimes were declared, so `archer run` used the host's exact PHP 8.5.8 and Node 22.14.0. Through `archer run`, `key:generate` succeeded, `npm run build` produced all three Vite builds, PHPUnit passed 62 tests with 400 assertions, and `npm run test:js` passed 18 of 18 tests. These are single Linux observations.
+
+All nine Go packages passed native Windows and Linux tests; Go vet passed on both.
+
+Known upstream issue: the `parallax/cli` `slipstream` binary requires its own `vendor/autoload.php`, so `vendor/bin/slipstream` fails under Composer as well as Archer. It should fall back to the host project's autoloader.

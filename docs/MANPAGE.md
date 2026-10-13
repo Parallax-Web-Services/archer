@@ -30,7 +30,7 @@ archer --help
 
 ## DESCRIPTION
 
-Archer prepares project capabilities by checking existing services and local software before obtaining new artifacts. Requirements come from `archer.json` in the selected project directory. Positional capability names replace that file's requirement list for the current invocation; they do not add to it. Matching selectors retain the declared delivery and version policy.
+Archer prepares project capabilities by checking existing services and local software before obtaining new artifacts. Requirements come from `archer.json` in the selected project directory or, without it, from the project's Composer/npm manifests and environment (see CONFIGURATION). Positional capability names replace that requirement list for the current invocation; they do not add to it. Matching selectors retain the declared delivery and version policy.
 
 For each compatible requirement, Archer prefers a configured service with a successful current health check, then an explicitly probed local capability, then a hash-verified managed executable or pinned executable recipe. A catalog advertisement alone does not establish configured access. An advertised service that needs configuration or verification blocks duplicate artifact installation. Missing, stale, or unavailable configured discovery blocks unrestricted fallback. Use `delivery: local` for an explicitly local-only artifact requirement.
 
@@ -101,7 +101,7 @@ Alias for `plan`. It evaluates the selected requirements rather than inspecting 
 
 ### context
 
-Print project-scoped provider bindings, context revision, and recent verified outcomes as JSON. An `archer.json` configuration is required. No probes or catalog requests run. This command does not change context.
+Print project-scoped provider bindings, context revision, and recent verified outcomes as JSON. No probes or catalog requests run. This command does not change context.
 
 ### capabilities
 
@@ -178,6 +178,8 @@ Print usage. Use the standalone `archer --help` form.
 Print the executable's version. Use the standalone `archer --version` form.
 
 ## CONFIGURATION
+
+Without `archer.json`, Archer follows Laravel convention instead of requiring another root file. Requirements are the direct `require`/`require-dev` and npm dependency declarations, as `init` would record them, and Archer settings come from `ARCHER_*` variables. Process environment variables take precedence over `.env`, which takes precedence over the committed `.env.example`. Recognized keys are `ARCHER_SCOPE` (default: the directory name), `ARCHER_COMPOSER_SOURCE_POLICY` (`checksum` or `source-reference`), `ARCHER_COMPOSER_TRUSTED_HOSTS` (comma-separated hostnames), and `ARCHER_PHP` (equivalent to `composer.php`). `PARALLAX_SAAS_INDEX_URL` is read the same way. Services, probes, recipes, and runtime pins still require `archer.json`; when that file exists, it is used instead of `ARCHER_*` project settings.
 
 `archer.json` must be one JSON object with schema `archer.project/v1` and a nonempty `scope`. Requirements are declared in a `requirements` array; omitted or null requirements are treated as empty. A requirement is a capability-name string or an object containing `capability`, optional `delivery`, and optional `constraint`. Delivery may be `service`, `local`, or `package`. Declare constraints in configuration; positional arguments are capability names, not free-form intent or version expressions.
 
@@ -257,7 +259,10 @@ Paths below HOME refer to the selected Archer state directory, not the user's or
 
 ```text
 PROJECT/archer.json
-    Project requirements, bindings, probes, registries, and recipes.
+    Optional project requirements, bindings, probes, registries, and recipes.
+
+PROJECT/.env, PROJECT/.env.example
+    ARCHER_* settings used when archer.json is absent.
 
 HOME/cache/sha256/PREFIX/DIGEST
     Verified artifact objects; PREFIX is the digest's first two characters.

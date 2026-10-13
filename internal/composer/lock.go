@@ -41,22 +41,24 @@ type Autoload struct {
 }
 
 type Package struct {
-	Name      string            `json:"name"`
-	Version   string            `json:"version"`
-	Path      string            `json:"path"`
-	URL       string            `json:"url"`
-	Reference string            `json:"reference"`
-	SourceURL string            `json:"source_url,omitempty"`
-	SHA1      string            `json:"sha1,omitempty"`
-	Type      string            `json:"type"`
-	Dev       bool              `json:"dev,omitempty"`
-	Autoload  Autoload          `json:"autoload"`
-	Bin       []string          `json:"bin,omitempty"`
-	Require   map[string]string `json:"require,omitempty"`
-	Provide   map[string]string `json:"provide,omitempty"`
-	Replace   map[string]string `json:"replace,omitempty"`
-	Conflict  map[string]string `json:"conflict,omitempty"`
-	Extra     map[string]any    `json:"extra,omitempty"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Path    string `json:"path"`
+	// DefaultBranch marks a branch version Composer aliases as 9999999-dev.
+	DefaultBranch bool              `json:"default_branch,omitempty"`
+	URL           string            `json:"url"`
+	Reference     string            `json:"reference"`
+	SourceURL     string            `json:"source_url,omitempty"`
+	SHA1          string            `json:"sha1,omitempty"`
+	Type          string            `json:"type"`
+	Dev           bool              `json:"dev,omitempty"`
+	Autoload      Autoload          `json:"autoload"`
+	Bin           []string          `json:"bin,omitempty"`
+	Require       map[string]string `json:"require,omitempty"`
+	Provide       map[string]string `json:"provide,omitempty"`
+	Replace       map[string]string `json:"replace,omitempty"`
+	Conflict      map[string]string `json:"conflict,omitempty"`
+	Extra         map[string]any    `json:"extra,omitempty"`
 }
 
 type Requirement struct {
@@ -89,6 +91,7 @@ type Plan struct {
 	PlatformConflicts    []Requirement     `json:"platform_conflicts,omitempty"`
 	Conflict             map[string]string `json:"conflict,omitempty"`
 	Scripts              map[string]any    `json:"scripts,omitempty"`
+	Repositories         []string          `json:"repositories,omitempty"`
 }
 
 const maxManifestBytes = 2 << 20
@@ -102,6 +105,8 @@ var referencePattern = regexp.MustCompile(`^[a-f0-9]{40}$`)
 var sha256Pattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var contentHashPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
 var stableVersionPattern = regexp.MustCompile(`^v?[0-9]+(?:\.[0-9]+){0,3}$`)
+var branchVersionPattern = regexp.MustCompile(`^(?:dev-[A-Za-z0-9][A-Za-z0-9._/-]*|v?[0-9]+(?:\.[0-9]+){0,2}\.x-dev)$`)
+var repositorySegmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 var extensionPattern = regexp.MustCompile(`^ext-[a-z0-9][a-z0-9_-]*$`)
 var hostPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$`)
 var ErrSourcePolicy = errors.New("Composer archive source policy requires review")
@@ -141,7 +146,7 @@ func Load(projectDir string, policy SourcePolicy) (*Plan, error) {
 	if value, _ := lock["content-hash"].(string); value != contentHash {
 		return nil, errors.New("composer.lock content-hash does not match composer.json")
 	}
-	for _, field := range []string{"aliases", "stability-flags", "platform-overrides"} {
+	for _, field := range []string{"aliases", "platform-overrides"} {
 		if !emptyJSON(lock[field]) {
 			return nil, fmt.Errorf("Composer %s is not supported by frozen replay", field)
 		}
@@ -156,8 +161,9 @@ func Load(projectDir string, policy SourcePolicy) (*Plan, error) {
 			}
 		}
 	}
-	if _, exists := manifest["repositories"]; exists {
-		return nil, errors.New("custom Composer repositories are not supported")
+	repositories, err := parseRepositories(manifest["repositories"])
+	if err != nil {
+		return nil, err
 	}
 	for _, field := range []string{"provide", "replace"} {
 		if !emptyJSON(manifest[field]) {
@@ -169,7 +175,7 @@ func Load(projectDir string, policy SourcePolicy) (*Plan, error) {
 			return nil, fmt.Errorf("Composer %s is not supported", field)
 		}
 	}
-	plan := &Plan{Schema: "archer.composer-plan/v1", ManifestSHA256: bytesHash(manifestBytes), LockSHA256: bytesHash(lockBytes), ContentHash: contentHash, Policy: policy, Packages: []Package{}, PlatformRequirements: []Requirement{}, Direct: map[string]string{}}
+	plan := &Plan{Schema: "archer.composer-plan/v1", ManifestSHA256: bytesHash(manifestBytes), LockSHA256: bytesHash(lockBytes), ContentHash: contentHash, Policy: policy, Packages: []Package{}, PlatformRequirements: []Requirement{}, Direct: map[string]string{}, Repositories: repositories}
 	plan.Name, _ = manifest["name"].(string)
 	if v, exists := manifest["name"]; exists {
 		if _, ok := v.(string); !ok {
@@ -213,6 +219,9 @@ func Load(projectDir string, policy SourcePolicy) (*Plan, error) {
 			plan.Direct[name] = constraint
 		}
 	}
+	if err := validateStabilityFlags(lock["stability-flags"], plan.Direct); err != nil {
+		return nil, err
+	}
 	plan.Autoload, err = parseAutoload(manifest["autoload"])
 	if err != nil {
 		return nil, fmt.Errorf("root autoload: %w", err)
@@ -239,7 +248,7 @@ func Load(projectDir string, policy SourcePolicy) (*Plan, error) {
 			if !ok {
 				return nil, errors.New("Composer locked package must be an object")
 			}
-			pkg, err := parsePackage(entry, field == "packages-dev", policy)
+			pkg, err := parsePackage(entry, field == "packages-dev", policy, repositories)
 			if err != nil {
 				return nil, err
 			}
@@ -352,7 +361,7 @@ func normalizePolicy(policy SourcePolicy) (SourcePolicy, error) {
 	return policy, nil
 }
 
-func parsePackage(entry map[string]any, dev bool, policy SourcePolicy) (Package, error) {
+func parsePackage(entry map[string]any, dev bool, policy SourcePolicy, repositories []string) (Package, error) {
 	if err := validateObjectFields(entry, "require", "provide", "replace", "conflict", "autoload", "extra"); err != nil {
 		return Package{}, err
 	}
@@ -368,8 +377,14 @@ func parsePackage(entry map[string]any, dev bool, policy SourcePolicy) (Package,
 	if pkg.Type == "" {
 		pkg.Type = "library"
 	}
-	if !packagePattern.MatchString(pkg.Name) || !stableVersionPattern.MatchString(pkg.Version) {
-		return pkg, errors.New("locked package requires a safe name and stable numeric version")
+	if !packagePattern.MatchString(pkg.Name) || !stableVersionPattern.MatchString(pkg.Version) && !branchVersionPattern.MatchString(pkg.Version) {
+		return pkg, errors.New("locked package requires a safe name and a stable numeric or branch version")
+	}
+	if v, exists := entry["default-branch"]; exists {
+		var ok bool
+		if pkg.DefaultBranch, ok = v.(bool); !ok || pkg.DefaultBranch && !strings.HasPrefix(pkg.Version, "dev-") {
+			return pkg, fmt.Errorf("%s has invalid default-branch metadata", pkg.Name)
+		}
 	}
 	if pkg.Type != "library" && pkg.Type != "project" {
 		return pkg, fmt.Errorf("%s has unsupported package type %s", pkg.Name, pkg.Type)
@@ -407,12 +422,18 @@ func parsePackage(entry map[string]any, dev bool, policy SourcePolicy) (Package,
 			return pkg, fmt.Errorf("%s source and dist references must match immutable Git references", pkg.Name)
 		}
 		pkg.SourceURL, _ = obj["url"].(string)
-		if err := validateSourceRepository(pkg.SourceURL, pkg.URL); err != nil {
-			return pkg, fmt.Errorf("%s: %w", pkg.Name, err)
-		}
 	}
 	if err := validateArchiveURL(pkg.URL, pkg.Reference, policy); err != nil {
 		return pkg, fmt.Errorf("%s: %w", pkg.Name, err)
+	}
+	repository := archiveRepository(pkg.URL, pkg.Reference)
+	if pkg.SourceURL != "" {
+		if err := validateSourceRepository(pkg.SourceURL, repository); err != nil {
+			return pkg, fmt.Errorf("%s: %w", pkg.Name, err)
+		}
+	}
+	if !strings.HasPrefix(repository, "github.com/") && !containsString(repositories, repository) {
+		return pkg, fmt.Errorf("%s: archive repository is not declared in composer.json repositories", pkg.Name)
 	}
 	var err error
 	pkg.Autoload, err = parseAutoload(entry["autoload"])
@@ -458,33 +479,41 @@ func parsePackage(entry map[string]any, dev bool, policy SourcePolicy) (Package,
 
 func validateArchiveURL(raw, reference string, policy SourcePolicy) error {
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || u.Path != path.Clean(u.Path) {
+	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" {
 		return errors.New("archive URL must be an absolute clean URL without credentials, query, or fragment")
 	}
 	host := strings.ToLower(u.Hostname())
 	ip := net.ParseIP(host)
 	loopback := host == "localhost" || (ip != nil && ip.IsLoopback())
-	if !loopback && host != "api.github.com" && host != "codeload.github.com" {
-		return fmt.Errorf("%w: only GitHub repository archives are supported", ErrSourcePolicy)
+	_, gitlab := gitlabArchiveProject(u, reference)
+	gitlab = gitlab && host != "api.github.com" && host != "codeload.github.com"
+	if !gitlab && (u.RawQuery != "" || u.RawPath != "" || u.Path != path.Clean(u.Path)) {
+		return errors.New("archive URL must be an absolute clean URL without credentials, query, or fragment")
+	}
+	if !gitlab && !loopback && host != "api.github.com" && host != "codeload.github.com" {
+		return fmt.Errorf("%w: only GitHub repository archives and explicitly trusted GitLab archives are supported", ErrSourcePolicy)
 	}
 	if !loopback && u.Port() != "" && u.Port() != "443" {
-		return errors.New("GitHub archive URLs must use the HTTPS default port")
+		return errors.New("archive URLs must use the HTTPS default port")
 	}
 	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
 		return errors.New("archive URL requires HTTPS")
 	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	valid := false
-	if (host == "api.github.com" || loopback) && len(parts) == 5 && parts[0] == "repos" && parts[1] != "" && parts[2] != "" && parts[3] == "zipball" && parts[4] == reference {
-		valid = true
+	if !gitlab {
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		valid := false
+		if (host == "api.github.com" || loopback) && len(parts) == 5 && parts[0] == "repos" && parts[1] != "" && parts[2] != "" && parts[3] == "zipball" && parts[4] == reference {
+			valid = true
+		}
+		if (host == "codeload.github.com" || loopback) && len(parts) == 4 && parts[0] != "" && parts[1] != "" && (parts[2] == "zip" || parts[2] == "legacy.zip") && parts[3] == reference {
+			valid = true
+		}
+		if !valid {
+			return errors.New("archive URL must contain an exact supported repository/ref path")
+		}
 	}
-	if (host == "codeload.github.com" || loopback) && len(parts) == 4 && parts[0] != "" && parts[1] != "" && (parts[2] == "zip" || parts[2] == "legacy.zip") && parts[3] == reference {
-		valid = true
-	}
-	if !valid {
-		return errors.New("archive URL must contain an exact supported repository/ref path")
-	}
-	if policy.Mode == "source-reference" {
+	// GitLab archives are never implicitly trusted, even under checksum policy.
+	if gitlab || policy.Mode == "source-reference" {
 		trusted := false
 		for _, allowed := range policy.TrustedHosts {
 			if host == allowed {
@@ -498,28 +527,181 @@ func validateArchiveURL(raw, reference string, policy SourcePolicy) error {
 	return nil
 }
 
-func validateSourceRepository(sourceRaw, archiveRaw string) error {
-	source, err := url.Parse(sourceRaw)
-	if err != nil || source.Scheme != "https" || source.Host != "github.com" || source.User != nil || source.RawQuery != "" || source.Fragment != "" || source.RawPath != "" || source.Path != path.Clean(source.Path) {
-		return errors.New("Git source provenance must use an exact GitHub repository URL")
+// gitlabArchiveProject returns the namespaced project of a GitLab API archive
+// whose query pins exactly one immutable commit.
+func gitlabArchiveProject(u *url.URL, reference string) (string, bool) {
+	const prefix, suffix = "/api/v4/projects/", "/repository/archive.zip"
+	escaped := u.EscapedPath()
+	if !strings.HasPrefix(escaped, prefix) || !strings.HasSuffix(escaped, suffix) || u.RawQuery != "sha="+reference || u.Fragment != "" {
+		return "", false
 	}
-	parts := strings.Split(strings.Trim(source.Path, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return errors.New("Git source provenance must identify one GitHub repository")
+	encoded := strings.TrimSuffix(strings.TrimPrefix(escaped, prefix), suffix)
+	if strings.Contains(encoded, "/") {
+		return "", false
 	}
-	archive, err := url.Parse(archiveRaw)
+	project, err := url.PathUnescape(encoded)
+	if err != nil || !repositoryPath(project) {
+		return "", false
+	}
+	return project, true
+}
+
+func repositoryPath(value string) bool {
+	parts := strings.Split(value, "/")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, part := range parts {
+		if !repositorySegmentPattern.MatchString(part) || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// archiveRepository names the repository of a validated archive URL as
+// host/path. GitHub API, codeload, and loopback fixture routes name github.com.
+func archiveRepository(raw, reference string) string {
+	u, err := url.Parse(raw)
 	if err != nil {
-		return err
+		return ""
 	}
-	archiveParts := strings.Split(strings.Trim(archive.Path, "/"), "/")
-	offset := 0
-	if len(archiveParts) > 0 && archiveParts[0] == "repos" {
-		offset = 1
+	host := strings.ToLower(u.Hostname())
+	if project, ok := gitlabArchiveProject(u, reference); ok && host != "api.github.com" && host != "codeload.github.com" {
+		return repositoryKey(host, project)
 	}
-	if len(archiveParts) < offset+2 || !strings.EqualFold(parts[0], archiveParts[offset]) || !strings.EqualFold(strings.TrimSuffix(parts[1], ".git"), archiveParts[offset+1]) {
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) > 0 && parts[0] == "repos" {
+		parts = parts[1:]
+	}
+	if len(parts) < 2 {
+		return ""
+	}
+	return repositoryKey("github.com", parts[0]+"/"+parts[1])
+}
+
+func repositoryKey(host, project string) string {
+	return strings.ToLower(host) + "/" + strings.ToLower(strings.TrimSuffix(project, ".git"))
+}
+
+func validateSourceRepository(sourceRaw, repository string) error {
+	source, err := url.Parse(sourceRaw)
+	if err != nil || source.Scheme != "https" || source.Host == "" || source.Port() != "" || source.User != nil || source.RawQuery != "" || source.Fragment != "" || source.RawPath != "" || source.Path != path.Clean(source.Path) {
+		return errors.New("Git source provenance must use an exact HTTPS repository URL")
+	}
+	project := strings.Trim(source.Path, "/")
+	if !repositoryPath(strings.TrimSuffix(project, ".git")) || (source.Host == "github.com" && strings.Count(project, "/") != 1) {
+		return errors.New("Git source provenance must identify one repository")
+	}
+	if repositoryKey(source.Host, project) != repository {
 		return errors.New("Git source repository does not match the locked distribution repository")
 	}
 	return nil
+}
+
+// parseRepositories accepts VCS repository declarations. Packages they supply
+// still need immutable commit archives from an explicitly trusted host.
+func parseRepositories(value any) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	entries := []any{}
+	switch v := value.(type) {
+	case []any:
+		entries = v
+	case map[string]any:
+		names := make([]string, 0, len(v))
+		for name := range v {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			entries = append(entries, v[name])
+		}
+	default:
+		return nil, errors.New("Composer repositories must be an array or object")
+	}
+	seen := map[string]bool{}
+	result := []string{}
+	for _, entry := range entries {
+		repository, ok := entry.(map[string]any)
+		if !ok {
+			return nil, errors.New("only VCS Composer repositories are supported; Packagist cannot be disabled")
+		}
+		for field := range repository {
+			if field != "type" && field != "url" && field != "name" {
+				return nil, fmt.Errorf("Composer repository field %s is not supported", field)
+			}
+		}
+		if name, exists := repository["name"]; exists {
+			if _, ok := name.(string); !ok {
+				return nil, errors.New("Composer repository name must be a string")
+			}
+		}
+		switch repository["type"] {
+		case "vcs", "git", "github", "gitlab":
+		default:
+			return nil, fmt.Errorf("Composer repository type %v is not supported", repository["type"])
+		}
+		raw, _ := repository["url"].(string)
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.Port() != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || u.Path != path.Clean(u.Path) || !repositoryPath(strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")) {
+			return nil, errors.New("Composer VCS repositories require an exact HTTPS repository URL")
+		}
+		key := repositoryKey(u.Host, strings.Trim(u.Path, "/"))
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, key)
+		}
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+// Stability flags only steer Composer's solver; replay accepts them for
+// direct requirements because the locked graph is already resolved.
+func validateStabilityFlags(value any, direct map[string]string) error {
+	if emptyJSON(value) {
+		return nil
+	}
+	flags, ok := value.(map[string]any)
+	if !ok {
+		return errors.New("Composer stability-flags must be an object")
+	}
+	for name, flag := range flags {
+		number, ok := flag.(json.Number)
+		if _, declared := direct[name]; !ok || !declared {
+			return fmt.Errorf("Composer stability flag for %s is not supported by frozen replay", name)
+		}
+		switch number.String() {
+		case "0", "5", "10", "15", "20":
+		default:
+			return fmt.Errorf("invalid Composer stability flag for %s", name)
+		}
+	}
+	return nil
+}
+
+func containsString(values []string, value string) bool {
+	for _, v := range values {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+// branchConstraint reports the branch named by an exact branch constraint,
+// ignoring a stability suffix and returning any #commit pin.
+func branchConstraint(constraint string) (branch, reference string, ok bool) {
+	constraint, _, _ = strings.Cut(constraint, "@")
+	branch, reference, _ = strings.Cut(constraint, "#")
+	return branch, reference, branchVersionPattern.MatchString(branch)
+}
+
+func branchSatisfies(pkg Package, constraint string) bool {
+	branch, reference, ok := branchConstraint(constraint)
+	return ok && branch == pkg.Version && (reference == "" || reference == pkg.Reference)
 }
 
 func validateObjectFields(obj map[string]any, fields ...string) error {
@@ -628,6 +810,10 @@ func validateGraph(plan *Plan) error {
 				if c == "self.version" {
 					c = pkg.Version
 				}
+				if _, _, branch := branchConstraint(c); branch {
+					providers[name] = append(providers[name], struct{ version, constraint string }{pkg.Version, c})
+					continue
+				}
 				if _, err := parseConstraint(c); err != nil {
 					return fmt.Errorf("%s provides/replaces %s: %w", pkg.Name, name, err)
 				}
@@ -647,6 +833,21 @@ func validateGraph(plan *Plan) error {
 	}
 	for _, group := range groups {
 		for name, c := range group.deps {
+			if branch, _, ok := branchConstraint(c); ok {
+				satisfied := false
+				if pkg, exists := byName[name]; exists {
+					satisfied = branchSatisfies(pkg, c)
+				}
+				for _, provider := range providers[name] {
+					if provider.constraint == branch {
+						satisfied = true
+					}
+				}
+				if !satisfied {
+					return fmt.Errorf("%s requires %s %s, absent or incompatible in the frozen lock", group.from, name, c)
+				}
+				continue
+			}
 			if _, err := parseConstraint(c); err != nil {
 				return fmt.Errorf("%s requires %s: %w", group.from, name, err)
 			}
@@ -661,7 +862,7 @@ func validateGraph(plan *Plan) error {
 				continue
 			}
 			satisfied := false
-			if pkg, exists := byName[name]; exists {
+			if pkg, exists := byName[name]; exists && !branchVersionPattern.MatchString(pkg.Version) {
 				ok, err := Satisfies(pkg.Version, c)
 				if err != nil {
 					return err
@@ -670,6 +871,9 @@ func validateGraph(plan *Plan) error {
 			}
 			if !satisfied {
 				for _, provider := range providers[name] {
+					if _, _, branch := branchConstraint(provider.constraint); branch {
+						continue
+					}
 					ok, err := constraintsOverlap(c, provider.constraint)
 					if err != nil {
 						return err
@@ -697,6 +901,12 @@ func validateGraph(plan *Plan) error {
 	}
 	for _, group := range conflicts {
 		for name, c := range group.deps {
+			if _, _, ok := branchConstraint(c); ok {
+				if pkg, exists := byName[name]; exists && pkg.Name != group.from && branchSatisfies(pkg, c) {
+					return fmt.Errorf("%s conflicts with locked %s %s", group.from, name, pkg.Version)
+				}
+				continue
+			}
 			if _, err := parseConstraint(c); err != nil {
 				return fmt.Errorf("%s conflicts with %s: %w", group.from, name, err)
 			}
@@ -714,6 +924,9 @@ func validateGraph(plan *Plan) error {
 				continue
 			}
 			if pkg, exists := byName[name]; exists && pkg.Name != group.from {
+				if branchVersionPattern.MatchString(pkg.Version) {
+					return fmt.Errorf("%s conflict %s with branch version %s of %s cannot be evaluated by frozen replay", group.from, c, pkg.Version, name)
+				}
 				ok, err := Satisfies(pkg.Version, c)
 				if err != nil {
 					return err

@@ -705,12 +705,17 @@ func installHex(value string, size int) bool {
 type installArchive struct {
 	url                          *url.URL
 	owner, repository, reference string
+	// forge is empty for GitHub routes and the host for a GitLab API archive.
+	forge string
 }
 
 func installHostTrusted(policy SourcePolicy, host string) bool {
 	if policy.Mode == "checksum" && (strings.EqualFold(host, "api.github.com") || strings.EqualFold(host, "codeload.github.com")) {
 		return true
 	}
+	return installHostListed(policy, host)
+}
+func installHostListed(policy SourcePolicy, host string) bool {
 	for _, allowed := range policy.TrustedHosts {
 		if strings.EqualFold(allowed, host) {
 			return true
@@ -720,7 +725,12 @@ func installHostTrusted(policy SourcePolicy, host string) bool {
 }
 func installArchiveIdentity(raw, reference string, policy SourcePolicy) (installArchive, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || u.RawPath != "" || !installHostTrusted(policy, u.Hostname()) || !installHex(reference, 40) {
+	if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" || !installHostTrusted(policy, u.Hostname()) || !installHex(reference, 40) {
+		return installArchive{}, errors.New("Composer archive URL violates explicit source policy")
+	}
+	project, gitlab := gitlabArchiveProject(u, reference)
+	gitlab = gitlab && !strings.EqualFold(u.Hostname(), "api.github.com") && !strings.EqualFold(u.Hostname(), "codeload.github.com")
+	if !gitlab && (u.RawQuery != "" || u.RawPath != "") {
 		return installArchive{}, errors.New("Composer archive URL violates explicit source policy")
 	}
 	ip := net.ParseIP(u.Hostname())
@@ -733,6 +743,19 @@ func installArchiveIdentity(raw, reference string, policy SourcePolicy) (install
 	}
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
 	identity := installArchive{url: u, reference: reference}
+	if gitlab {
+		// GitLab hosts are trusted only when named; checksum mode never implies them.
+		if !installHostListed(policy, u.Hostname()) {
+			return installArchive{}, errors.New("Composer archive URL violates explicit source policy")
+		}
+		cut := strings.LastIndex(project, "/")
+		identity.forge = strings.ToLower(u.Hostname())
+		identity.owner, identity.repository = project[:cut], project[cut+1:]
+		if !installSafeRelative(identity.owner) || !installSafeRelative(identity.repository) {
+			return installArchive{}, errors.New("invalid GitLab archive project")
+		}
+		return identity, nil
+	}
 	switch {
 	case (strings.EqualFold(u.Hostname(), "api.github.com") || loopback) && len(parts) == 5 && parts[0] == "repos" && parts[3] == "zipball" && parts[4] == reference:
 		identity.owner, identity.repository = parts[1], parts[2]
@@ -747,7 +770,7 @@ func installArchiveIdentity(raw, reference string, policy SourcePolicy) (install
 	return identity, nil
 }
 func installSameArchive(a, b installArchive) bool {
-	return strings.EqualFold(a.owner, b.owner) && strings.EqualFold(a.repository, b.repository) && a.reference == b.reference
+	return a.forge == b.forge && strings.EqualFold(a.owner, b.owner) && strings.EqualFold(a.repository, b.repository) && a.reference == b.reference
 }
 func installArchiveClient(identity installArchive, policy SourcePolicy) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
