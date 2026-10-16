@@ -166,4 +166,4 @@ Planning returned exit 2 for pending work. The approved installation and offline
 
 All nine Go packages passed native Windows and Linux tests; Go vet passed on both.
 
-Known upstream issue: the `parallax/cli` `slipstream` binary requires its own `vendor/autoload.php`, so `vendor/bin/slipstream` fails under Composer as well as Archer. It should fall back to the host project's autoloader.
+At that commit, the `parallax/cli` `slipstream` binary required its own `vendor/autoload.php`, so `vendor/bin/slipstream` failed under Composer as well as Archer. `parallax/cli` [0af6a7b](https://gitlab.com/parallax-web-services/cli/-/commit/0af6a7b4b96e3d1ad54f83eef8be15f5e48d59c9) loads the autoloader named by the host project's bin proxy instead. With Zefram [50ff53d](https://github.com/Parallax-Web-Services/zefram/commit/50ff53da) locking that commit, the published v0.3.0-alpha.4 binary installed 121 PHP packages and 112 npm placements on a fresh home. Through `archer run`, `vendor/bin/slipstream` and `slipstream kit` succeeded, all three Vite builds succeeded, and PHPUnit (62 tests) and the 18 JS tests passed.
